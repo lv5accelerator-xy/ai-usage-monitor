@@ -58,7 +58,7 @@ jobs:
           $client = Start-Process -FilePath ./dist/CodexUsage.exe -ArgumentList ('--self-test "' + $root + '"') -PassThru
           if (-not $client.WaitForExit(120000)) { $client.Kill(); throw 'Packaged client test timed out.' }
           Get-Content (Join-Path $root 'client-test.txt')
-          if ($client.ExitCode -ne 0) { throw 'Packaged client test failed.' }
+          if ($client.ExitCode -ne 0) { Get-Content (Join-Path $root 'data/logs/smoke-report.txt') -ErrorAction SilentlyContinue; Get-Content (Join-Path $root 'data/logs/tray.log') -Tail 40 -ErrorAction SilentlyContinue; throw 'Packaged client test failed.' }
       - name: Upload desktop distribution
         uses: actions/upload-artifact@v4
         with:
