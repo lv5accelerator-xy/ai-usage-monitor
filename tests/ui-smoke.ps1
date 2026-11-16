@@ -419,24 +419,23 @@ $codexChart = @($codexCardTree | Where-Object { $_ -is [CodexUsage.UsageSparklin
 Assert-Ui ($codexChart.Count -eq 1 -and $codexChart[0].Values.Length -eq 7 -and $codexChart[0].HighlightIndex -eq 6 -and $codexChart[0].Values[6] -eq 45900 -and $codexChart[0].Labels[6] -eq '今') 'Codex card has a seven-day trend ending today.'
 Assert-Ui (@(Get-ControlTree $claudeCard | Where-Object { $_ -is [CodexUsage.UsageSparkline] }).Count -eq 1) 'Claude card has a trend chart.'
 Assert-Ui (@(Get-ControlTree $script:ContentPanel.Controls[1] | Where-Object { $_ -is [CodexUsage.UsageSparkline] }).Count -eq 0) 'Accounts without local logs show no empty chart.'
-# Burn-rate forecast: work 5h falls 30%/h with 49% left and reset in 2 h -> runs out first.
+# Burn-rate forecast: personal 5h falls 30%/h with 49% left and reset in 2 h -> runs out first.
+$personalLocal.fiveHour.remainingPercent = 49
 $script:UsageHistory = @{}
 for ($m = 20; $m -ge 0; $m--) {
-  Add-UsageSamples -History $script:UsageHistory -Data ([pscustomobject]@{ profiles = @([pscustomobject]@{ id = 'work'; ok = $true; fetchedAt = [DateTimeOffset]::Now.AddMinutes(-$m).ToString('o'); fiveHour = [pscustomobject]@{ remainingPercent = (49 + $m * 0.5); resetsAt = $resetTime }; weekly = $null }) }) -Now ([DateTimeOffset]::Now)
+  Add-UsageSamples -History $script:UsageHistory -Data ([pscustomobject]@{ profiles = @([pscustomobject]@{ id = 'personal'; ok = $true; fetchedAt = [DateTimeOffset]::Now.AddMinutes(-$m).ToString('o'); fiveHour = [pscustomobject]@{ remainingPercent = (49 + $m * 0.5); resetsAt = $resetTime }; weekly = $null }) }) -Now ([DateTimeOffset]::Now)
 }
 Update-Status
-$workFive = @($script:ResetLabels | Where-Object { $_.Tag.kind -eq 'fiveHour' -and [string]$_.Tag.profile.id -eq 'work' })
-$workProfile = $workFive[0].Tag.profile
-$workForecast = Get-ProfileForecast $workProfile 'fiveHour'
-Assert-Ui ($workFive.Count -eq 1) ('One work 5h reset label exists: ' + $workFive.Count + ' of ' + @($script:ResetLabels).Count + ' tags=' + ((@($script:ResetLabels) | ForEach-Object { if ($null -eq $_.Tag) { 'null' } else { [string]$_.Tag.kind + '/' + [string]$_.Tag.profile.id + '/' + ($_.Tag.PSObject.Properties.Name -join ',') } }) -join '; '))
-Assert-Ui ($workFive[0].Text -match '用完') ('Card reset line shows the exhaustion forecast: "' + $workFive[0].Text + '" state=' + [string]$workForecast.state + ' remaining=' + [string]$workProfile.fiveHour.remainingPercent + ' reset=' + [string]$workProfile.fiveHour.resetsAt + ' ok=' + [string]$workProfile.ok + ' samples=' + [string]$script:UsageHistory['work|fiveHour'].Count)
-Assert-Ui ($workFive[0].ForeColor.ToArgb() -eq $script:Theme.Warning.ToArgb()) 'Forecast reset line is amber.'
-Assert-Ui ($script:ToolTip.GetToolTip($workFive[0]) -match '%/小时') 'Forecast tooltip shows the burn rate.'
 $personalFive = @($script:ResetLabels | Where-Object { $_.Tag.kind -eq 'fiveHour' -and [string]$_.Tag.profile.id -eq 'personal' })
-Assert-Ui ($personalFive[0].Text -notmatch '用完') 'Accounts without history show no forecast.'
+Assert-Ui ($personalFive.Count -eq 1 -and $personalFive[0].Text -match '用完') ('Card reset line shows the exhaustion forecast: ' + [string]$personalFive[0].Text)
+Assert-Ui ($personalFive[0].ForeColor.ToArgb() -eq $script:Theme.Warning.ToArgb()) 'Forecast reset line is amber.'
+Assert-Ui ($script:ToolTip.GetToolTip($personalFive[0]) -match '%/小时') 'Forecast tooltip shows the burn rate.'
+$claudeFive = @($script:ResetLabels | Where-Object { $_.Tag.kind -eq 'fiveHour' -and [string]$_.Tag.profile.id -eq 'claude' })
+Assert-Ui ($claudeFive.Count -eq 1 -and $claudeFive[0].Text -notmatch '用完') 'Accounts without history show no forecast.'
 Update-BallSummary $script:LastData
-Assert-Ui ($script:CompactRecovery.work.Text -match '^5h 预计 .* 用完$') 'Compact strip warns before the 5h quota runs out.'
-Assert-Ui ($script:ToolTip.GetToolTip($script:BallCells.work.five) -match '消耗预测') 'Summary tooltip includes the forecast.'
+Assert-Ui ($script:CompactRecovery.personal.Text -match '^5h 预计 .* 用完$') ('Compact strip warns before the 5h quota runs out: ' + $script:CompactRecovery.personal.Text)
+Assert-Ui ($script:ToolTip.GetToolTip($script:BallCells.personal.five) -match '消耗预测') 'Summary tooltip includes the forecast.'
+$personalLocal.fiveHour.remainingPercent = 100
 $script:UsageHistory = @{}
 Update-Status
 foreach ($width in @(620,380)) {
