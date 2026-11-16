@@ -70,7 +70,8 @@ foreach ($entry in @(@{ form = $script:Popup; name = 'detail.png' },@{ form = $s
 $setupPreview = Show-AccountSettings -PreviewTest
 $setupPreview.Show()
 [System.Windows.Forms.Application]::DoEvents()
-Assert-Ui ($script:SetupRows.Count -eq 2) 'Setup page exposes both account slots.'
+Assert-Ui ($script:SetupRows.Count -eq 3) 'Setup page exposes two Codex slots and one Claude slot.'
+Assert-Ui ($script:SetupRows[2].enabled.Text -eq 'Claude') 'The third slot is the Claude account.'
 Assert-Ui ($script:SetupRows[0].name.MaxLength -eq 12) 'Names have a bounded readable length.'
 $setupBitmap = New-Object System.Drawing.Bitmap -ArgumentList $setupPreview.Width,$setupPreview.Height
 try {
