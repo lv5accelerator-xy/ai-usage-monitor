@@ -365,8 +365,8 @@ namespace CodexUsageDesktop {
                 }
             } finally { app.Ball.ApplyDpi(originalDpi, new Rectangle(app.Ball.Left, app.Ball.Top, 60 * originalDpi / 96, 328 * originalDpi / 96)); }
             var tooltip = (Dictionary<string, object>)Clone(sample);
-            ((Dictionary<string, object>)P(tooltip, 1)["weekly"])["resetsAt"] = DateTimeOffset.Now.AddDays(3).AddHours(1).ToString("o");
-            ((Dictionary<string, object>)P(tooltip, 1)["individualLimit"])["resetsAt"] = DateTimeOffset.Now.AddDays(20).AddHours(1).ToString("o");
+            ((Dictionary<string, object>)P(tooltip, 1)["weekly"])["resetsAt"] = DateTimeOffset.Now.AddDays(3).AddHours(1).AddMinutes(30).ToString("o");
+            ((Dictionary<string, object>)P(tooltip, 1)["individualLimit"])["resetsAt"] = DateTimeOffset.Now.AddDays(20).AddHours(1).AddMinutes(30).ToString("o");
             app.UpdateBallSummary(tooltip);
             Check(app.ToolTip.GetToolTip(app.RingCells["work-long"]).EndsWith(Model.ResetText(J.Get(P(tooltip, 1), "weekly", "resetsAt"))), "Weekly-limited ring tooltip uses the weekly reset.");
             ((Dictionary<string, object>)P(tooltip, 1)["individualLimit"])["remainingPercent"] = 10;
