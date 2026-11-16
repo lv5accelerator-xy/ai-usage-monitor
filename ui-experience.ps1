@@ -96,7 +96,8 @@ function Update-MonitorLayoutScale {
     $script:Ball.ApplyZoom([single]($scale / $script:AppliedMonitorScale))
     $script:AppliedMonitorScale = $scale
   }
-  $script:Ball.Radius = B 16
+  $script:Ball.Radius = B 10
+  $script:Ball.HudUnit = [single]((B 100) / 100.0)
 }
 function Apply-ProfileLayout {
   $active = @(Get-ActiveIds)

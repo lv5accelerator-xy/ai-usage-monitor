@@ -87,7 +87,7 @@
 
   function createAccountCard(profile, freshness) {
     const stale = freshness.level === 'stale' || freshness.level === 'expired' || !profile.ok;
-    const card = makeElement('article', `account-card${stale ? ' stale' : ''}`);
+    const card = makeElement('article', `account-card provider-${profile.id === 'claude' ? 'claude' : 'codex'}${stale ? ' stale' : ''}`);
     const header = makeElement('header', 'account-header');
     const titleWrap = makeElement('div');
     titleWrap.append(makeElement('p', 'eyebrow', profile.id === 'personal' ? 'CODEX · PERSONAL' : profile.id === 'claude' ? 'CLAUDE' : 'CODEX · WORK'));

@@ -1,17 +1,21 @@
 :root {
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "Microsoft YaHei UI", sans-serif;
-  background: #111319;
-  color: #f3f4f7;
-  --bg: #111319;
-  --surface: #1a1d25;
-  --surface-2: #222631;
-  --border: #303541;
-  --muted: #969daa;
-  --lavender: #b3a5ef;
-  --mint: #83d9bc;
-  --warning: #e5b66f;
-  --danger: #f08080;
+  background: #060a13;
+  color: #e4f3ff;
+  --bg: #060a13;
+  --surface: #0b1322;
+  --surface-2: #0f1b2e;
+  --border: #1a2b45;
+  --muted: #7d8fad;
+  --lavender: #b58cff;
+  --mint: #22e3ff;
+  --cyan: #22e3ff;
+  --violet: #b58cff;
+  --caption: #4f86b0;
+  --warning: #ffb547;
+  --danger: #ff4d6d;
+  --mono: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -105,3 +109,42 @@ button { touch-action: manipulation; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
+
+/* ---- HUD theme (v1.0): grid backdrop, bracketed cards, segmented meters ---- */
+body {
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(34,227,255,.16), transparent 55%),
+    linear-gradient(rgba(34,227,255,.035) 1px, transparent 1px) 0 0 / 100% 24px,
+    linear-gradient(90deg, rgba(34,227,255,.035) 1px, transparent 1px) 0 0 / 24px 100%,
+    var(--bg);
+}
+.topbar h1 { font-weight: 750; letter-spacing: .01em; text-shadow: 0 0 18px rgba(34,227,255,.35); }
+.eyebrow { color: var(--caption); font-family: var(--mono); letter-spacing: .22em; }
+.pill { font-family: var(--mono); border-radius: 4px; background: rgba(11,19,34,.85); }
+.icon-button, .secondary-button, .danger-button { border-radius: 4px; border-color: #1e5a78; color: var(--cyan); background: rgba(12,26,46,.9); }
+.primary-button { border-radius: 4px; background: linear-gradient(100deg, var(--cyan), #6ea8ff 60%, var(--violet)); color: #041019; box-shadow: 0 0 22px rgba(34,227,255,.25); }
+.setup-card, .account-card, .empty-card, .settings-dialog, .state-banner { border-radius: 6px; background: rgba(11,19,34,.92); box-shadow: 0 0 0 1px rgba(34,227,255,.04), 0 18px 50px rgba(0,0,0,.45); }
+.setup-icon { border-radius: 6px; background: linear-gradient(135deg, var(--cyan), var(--violet)); box-shadow: 0 0 26px rgba(34,227,255,.3); }
+.settings-form input[type="url"], .settings-form input[type="password"] { border-radius: 4px; background: #050912; font-family: var(--mono); }
+.settings-form input:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(34,227,255,.14); }
+.check-row input { accent-color: var(--cyan); }
+
+.account-card { --accent: var(--cyan); position: relative; }
+.account-card.provider-claude { --accent: var(--violet); }
+.account-card::before, .account-card::after { content: ""; position: absolute; width: 14px; height: 14px; border: 2px solid var(--accent); opacity: .8; pointer-events: none; }
+.account-card::before { top: 6px; left: 6px; border-right: 0; border-bottom: 0; }
+.account-card::after { right: 6px; bottom: 6px; border-left: 0; border-top: 0; }
+.account-card .eyebrow { color: var(--accent); }
+.account-header h2 { color: #e4f3ff; }
+.account-header { border-bottom: 1px solid var(--border); padding-bottom: 12px; position: relative; }
+.account-header::after { content: ""; position: absolute; left: 0; bottom: -1px; width: 45%; height: 1px; background: linear-gradient(90deg, var(--accent), transparent); }
+.account-state { border-radius: 3px; font-family: var(--mono); letter-spacing: .06em; background: rgba(15,27,46,.9); border: 1px solid var(--border); }
+.quota-heading strong { font-family: var(--mono); letter-spacing: 0; color: var(--accent); text-shadow: 0 0 14px color-mix(in srgb, var(--accent) 45%, transparent); }
+.quota-track { position: relative; height: 8px; border-radius: 0; background: #14223a; overflow: hidden; }
+.quota-track::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(90deg, transparent 0 calc(5% - 2px), #0b1322 calc(5% - 2px) 5%); }
+.quota-fill { border-radius: 0; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+.quota-fill.warning { background: var(--warning); box-shadow: 0 0 12px var(--warning); }
+.quota-fill.danger { background: var(--danger); box-shadow: 0 0 12px var(--danger); }
+.quota-fill.muted { background: #3a4a63; box-shadow: none; }
+.reset-grid dd, .local-usage, .dashboard-footer strong { font-family: var(--mono); }
+.account-card.stale { border-color: rgba(255,181,71,.3); }
