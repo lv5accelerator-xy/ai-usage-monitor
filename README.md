@@ -1,8 +1,20 @@
-# Codex Dual Usage Dashboard
+# Codex + Claude Usage Dashboard
 
-Windows desktop quota monitor for two ChatGPT/Codex accounts: Personal + Work.
+Windows desktop quota monitor for two ChatGPT/Codex accounts (Personal + Work) and one Claude account.
 
-Current version: **v0.9.4**
+Current version: **v1.0.0**
+
+## v1.0.0: Codex and Claude in one monitor
+
+- **Claude quota.** The Claude slot shows the subscription **5-hour** and **weekly (all models)** remaining quota with reset countdowns, the same way as Codex. Model-specific weekly windows (for example Sonnet) appear in the detail card and tooltips when Claude reports them.
+- **Local Claude Code usage.** Today and the last seven days: tokens (input / output / cache write / cache read), requests, main model and an estimated cost at public API prices. Subscription users are not billed per token; the figure is a comparison aid. Hover the usage line for a daily breakdown.
+- **No subscription login?** The card still shows local usage and marks quota as unavailable.
+- **Setup.** Install and log in to [Claude Code](https://docs.claude.com/en/docs/claude-code/setup), then open **账号与首次使用** and enable **Claude**, or use **账号登录 / 切换 → Claude 账号** for a guided install and `/login`. Upgrades add the Claude slot automatically and enable it only if Claude Code is already used on this computer.
+- **Privacy.** The dashboard reads `%USERPROFILE%\.claude\.credentials.json` (or `CLAUDE_CONFIG_DIR`) only to send one HTTPS request to Anthropic's usage endpoint. The token is never cached, logged, uploaded to the phone or refreshed. Refreshing would rotate Claude Code's refresh token and can log out running sessions, so an expired login asks you to open Claude Code once instead. Local statistics cache only token counts per message id, never prompts or responses.
+- **Rate limits.** Claude quota is requested at most every two minutes. On rate limiting or network errors the last reading (up to 15 minutes old) is reused; older values are marked stale.
+- **Mobile.** The iPhone PWA shows the Claude card plus aggregate today / seven-day tokens and cost.
+
+The Claude usage endpoint is the one Claude Code itself uses for its usage view. It is not a documented public API and may change; the dashboard then shows an error for the Claude card while Codex continues to work.
 
 ## Windows EXE client (recommended)
 
@@ -179,7 +191,8 @@ Hover over reset times for the exact local timestamp and monthly used/limit deta
 
 - Windows 10/11
 - Windows PowerShell 5.1+
-- Codex CLI
+- Codex CLI (for Codex accounts)
+- Claude Code (for the Claude account)
 - The dashboard itself has no Node.js dependency
 
 ## First run
@@ -213,6 +226,8 @@ The smoke test does not start a quota worker, log in, or modify saved UI setting
 ## Project files
 
 - `desktop/UsageReader.cs` — native packaged quota reader and child-process lifetime control
+- `claude-reader.cs` — Claude quota + local Claude Code usage reader, compiled into the EXE and loaded by script mode
+- `setup-claude.ps1` / `login-claude.bat` — guided Claude Code install and login
 - `ui-experience.ps1` — account preferences, onboarding, recovery refresh and desktop options
 - `tray.ps1` — floating monitor, detail panel, tray actions, refresh lifecycle
 - `ui-model.ps1` — quota selection and account-specific freshness rules

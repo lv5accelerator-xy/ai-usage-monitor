@@ -51,6 +51,20 @@ function Get-MobileLongTermWindow {
   return $weekly
 }
 
+function ConvertTo-MobileLocalUsage {
+  param($Usage)
+  if ($null -eq $Usage -or $null -eq $Usage.today -or $null -eq $Usage.week) { return $null }
+  $result = [ordered]@{}
+  foreach ($period in @('today','week')) {
+    $tokens = $null; $cost = $null
+    try { $tokens = [Math]::Max([double]0,[Math]::Floor([double]$Usage.$period.totalTokens)) } catch {}
+    try { $cost = [Math]::Round([Math]::Max([double]0,[double]$Usage.$period.costUsd),2) } catch {}
+    if ($null -eq $tokens -or [double]::IsNaN($tokens) -or [double]::IsInfinity($tokens)) { return $null }
+    $result[$period] = [ordered]@{ totalTokens = $tokens; costUsd = $cost }
+  }
+  return $result
+}
+
 function New-MobileUsageSnapshot {
   param(
     [Parameter(Mandatory = $true)]$Data,
@@ -62,9 +76,9 @@ function New-MobileUsageSnapshot {
     if ($null -eq $profile) { continue }
     if ($profile.PSObject.Properties.Name -contains 'enabled' -and -not [bool]$profile.enabled) { continue }
     $id = [string]$profile.id
-    if ($id -notin @('personal','work')) { continue }
+    if ($id -notin @('personal','work','claude')) { continue }
     $fresh = [bool]$profile.ok -and -not [bool]$profile.stale
-    $profiles += [ordered]@{
+    $entry = [ordered]@{
       id = $id
       label = [string]$profile.label
       ok = $fresh
@@ -73,6 +87,9 @@ function New-MobileUsageSnapshot {
       fiveHour = ConvertTo-MobileWindow $profile.fiveHour '5h' '5 Hours'
       longTerm = Get-MobileLongTermWindow $profile
     }
+    # Claude adds only aggregate token counts and estimated cost; never paths, models' prompts or ids.
+    if ($id -eq 'claude') { $entry['localUsage'] = ConvertTo-MobileLocalUsage $profile.localUsage }
+    $profiles += $entry
   }
   return [ordered]@{
     version = 1
@@ -96,6 +113,7 @@ function Get-MobileUsageSnapshotHash {
       status = [string]$profile.status
       fiveHour = $profile.fiveHour
       longTerm = $profile.longTerm
+      localUsage = $profile.localUsage
     }
   }
   $semantic = [ordered]@{

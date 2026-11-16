@@ -125,4 +125,42 @@ Assert-Equal $mergedPending.profiles[0].pending $true 'Pending state is retained
 Assert-Equal $mergedPending.profiles[0].stale $false 'Fresh pending values are not marked as failed'
 Assert-Equal $mergedPending.profiles[0].fetchedAt $pendingFixture.fetchedAt 'Pending refresh retains the account timestamp'
 Assert-Equal ((Get-ProfileUpdateText $mergedPending.profiles[0]) -match '正在读取') $true 'Update tooltip identifies the pending account'
+# v1.0: Claude account slot, geometry and local usage formatting.
+Assert-Equal ((Get-AllAccountIds) -join ',') 'personal,work,claude' 'Two Codex slots and one Claude slot'
+Assert-Equal (Get-MonitorWidth 1) 220 'Single-account width is unchanged'
+Assert-Equal (Get-MonitorWidth 2) 360 'Two-account width is unchanged'
+Assert-Equal (Get-MonitorWidth 3) 510 'Three accounts widen the strip'
+Assert-Equal (Get-ExpandedHeightFor 1) 108 'Single-account expanded height is unchanged'
+Assert-Equal (Get-ExpandedHeightFor 2) 142 'Two-account expanded height is unchanged'
+Assert-Equal (Get-ExpandedHeightFor 3) 176 'Three accounts add one row'
+Assert-Equal (Get-DefaultAccountName 'claude') 'Claude' 'Claude default name'
+Assert-Equal (Format-TokenCount 999) '999' 'Small token counts'
+Assert-Equal (Format-TokenCount 1250000) '1.3M' 'Million token counts'
+Assert-Equal (Format-TokenCount $null) '—' 'Missing token count'
+Assert-Equal (Format-Usd 12.345) '$12.35' 'Cost formatting'
+Assert-Equal (Format-Usd 0.004) '<$0.01' 'Tiny positive cost is not shown as zero'
+Assert-Equal ((Get-LocalUsageSummary $null) -match '暂无') $true 'Missing local usage is explicit'
+$claudeUsage = [pscustomobject]@{ today = [pscustomobject]@{ totalTokens = 2500000; costUsd = 4.5; inputTokens = 1; outputTokens = 2; cacheWriteTokens = 3; cacheReadTokens = 4; messages = 9 }; week = [pscustomobject]@{ totalTokens = 1.2e7; costUsd = 30 }; days = @(); topModelToday = 'Opus 5.5' }
+Assert-Equal (Get-LocalUsageSummary $claudeUsage) '今日 2.5M tokens · ≈$4.50　近 7 天 12.0M · ≈$30.00' 'Local usage summary'
+Assert-Equal ((Get-LocalUsageDetail $claudeUsage) -match '估算') $true 'Detail explains the cost is an estimate'
+$claudeProfile = [pscustomobject]@{ id = 'claude'; label = 'Claude'; provider = 'claude'; ok = $true; fetchedAt = [DateTimeOffset]::Now.ToString('o'); fiveHour = [pscustomobject]@{ remainingPercent = 80 }; weekly = [pscustomobject]@{ remainingPercent = 40; resetsAt = $null }; individualLimit = $null }
+Assert-Equal (Get-QuotaPair $claudeProfile).longTerm 40 'Claude long-term uses the all-model weekly window'
+Assert-Equal (Test-ClaudeProfile $claudeProfile) $true 'Claude profile detection'
+Assert-Equal (Test-ClaudeProfile $personal) $false 'Codex profile is not Claude'
+$migrationHome = Join-Path ([System.IO.Path]::GetTempPath()) ('claude-migration-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $migrationHome | Out-Null
+$savedClaudeDir = $env:CLAUDE_CONFIG_DIR
+try {
+  $env:CLAUDE_CONFIG_DIR = $null
+  $legacy = [pscustomobject]@{ profiles = @([pscustomobject]@{ id = 'personal'; label = '个人'; codexHome = '~/.codex-personal' }) }
+  Assert-Equal (Add-ClaudeProfileIfMissing -Config $legacy -UserProfile $migrationHome) $true 'Older configurations gain a Claude slot'
+  Assert-Equal @($legacy.profiles).Count 2 'Existing Codex profiles are retained'
+  Assert-Equal $legacy.profiles[1].enabled $false 'Claude starts hidden when Claude Code is not set up'
+  Assert-Equal (Add-ClaudeProfileIfMissing -Config $legacy -UserProfile $migrationHome) $false 'Migration is idempotent'
+  New-Item -ItemType Directory -Force -Path (Join-Path $migrationHome '.claude/projects') | Out-Null
+  $legacy2 = [pscustomobject]@{ profiles = @([pscustomobject]@{ id = 'work'; label = '工作' }) }
+  [void](Add-ClaudeProfileIfMissing -Config $legacy2 -UserProfile $migrationHome)
+  Assert-Equal $legacy2.profiles[1].enabled $true 'Claude starts visible when Claude Code is already used here'
+  Assert-Equal $legacy2.profiles[1].provider 'claude' 'Migrated slot is routed to the Claude reader'
+} finally { $env:CLAUDE_CONFIG_DIR = $savedClaudeDir; Remove-Item -Recurse -Force $migrationHome -ErrorAction SilentlyContinue }
 Write-Output "UI model: $script:Checks checks passed."

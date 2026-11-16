@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 . (Join-Path $root 'ui-model.ps1')
 . (Join-Path $root 'remote-crypto.ps1')
@@ -44,6 +44,19 @@ Assert-Mobile ($snapshot.profiles[0].longTerm.kind -eq 'weekly' -and $snapshot.p
 Assert-Mobile ($snapshot.profiles[1].longTerm.kind -eq 'workspace' -and $snapshot.profiles[1].longTerm.remainingPercent -eq 27) 'Workspace must win when it is more limiting.'
 foreach ($forbidden in @('codexHome','accountId','accessToken','refreshToken','token','cookies','sessionPath','auth.json','C:\Users\secret','token-secret','refresh-secret','generic-secret','cookie-secret')) {
   Assert-Mobile (-not $json.Contains($forbidden)) ('Snapshot must exclude ' + $forbidden)
+}
+$claudeAccount = [pscustomobject]@{
+  id='claude'; label='Claude'; provider='claude'; enabled=$true; ok=$true; stale=$false; fetchedAt=$now.ToString('o'); claudeHome='C:\Users\secret\.claude'
+  fiveHour=[pscustomobject]@{ remainingPercent=80; resetsAt=$now.AddHours(2).ToString('o') }
+  weekly=[pscustomobject]@{ remainingPercent=55; resetsAt=$now.AddDays(3).ToString('o') }
+  localUsage=[pscustomobject]@{ today=[pscustomobject]@{ totalTokens=1234567.8; costUsd=3.456; inputTokens=1 }; week=[pscustomobject]@{ totalTokens=9e6; costUsd=20 }; topModelToday='Opus 5.5'; days=@() }
+}
+$claudeSnapshot = New-MobileUsageSnapshot -Data ([pscustomobject]@{ profiles=@($claudeAccount) }) -Settings $settings -Now $now
+Assert-Mobile ($claudeSnapshot.profiles.Count -eq 1 -and $claudeSnapshot.profiles[0].id -eq 'claude') 'Claude is published to the phone.'
+Assert-Mobile ($claudeSnapshot.profiles[0].localUsage.today.totalTokens -eq 1234567 -and $claudeSnapshot.profiles[0].localUsage.today.costUsd -eq 3.46) 'Claude local usage is reduced to rounded aggregates.'
+$claudeJson = $claudeSnapshot | ConvertTo-Json -Depth 12 -Compress
+foreach ($forbidden in @('claudeHome','C:\Users\secret','inputTokens','topModelToday','Opus')) {
+  Assert-Mobile (-not $claudeJson.Contains($forbidden)) ('Claude snapshot must not contain ' + $forbidden)
 }
 $weeklyOnly = [pscustomobject]@{ weekly=$personal.weekly; individualLimit=$null }
 $workspaceOnly = [pscustomobject]@{ weekly=$null; individualLimit=[pscustomobject]@{ limit=1; remainingPercent=0; resetsAt=$now.AddMinutes(-1).ToString('o') } }

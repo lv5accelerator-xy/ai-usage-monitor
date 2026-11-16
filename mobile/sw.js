@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'codex-usage-shell-v0.9.4';
+const CACHE_NAME = 'codex-usage-shell-v1.0.0';
 const SHELL = [
   './', './index.html', './styles.css', './crypto.js', './model.js', './app.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'

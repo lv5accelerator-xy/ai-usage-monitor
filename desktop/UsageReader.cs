@@ -132,7 +132,16 @@ namespace CodexUsageDesktop {
             return new { id = Text(Get(profile, "id")), label = Text(Get(profile, "label")), codexHome = Text(Get(profile, "codexHome")), ok = true, fetchedAt = DateTimeOffset.UtcNow.ToString("o"), planType = Text(Get(snapshot, "planType")), accountId = Get(result, "accountId"), ordinaryUsageAllowed = Get(result, "ordinaryUsageAllowed"), individualLimit = individual, fiveHour = windows.FirstOrDefault(w => Text(Get(w, "kind")) == "5h"), weekly = windows.FirstOrDefault(w => Text(Get(w, "kind")) == "weekly"), windows };
         }
         public static object ReadProfiles(string config, string cli) {
-            return ReadProfilesWithReader(config, profile => ConvertResult(profile, ReadRpc(ServerInfo(cli, Home(Text(Get(profile, "codexHome")))))), null);
+            string data = Path.GetDirectoryName(Path.GetFullPath(config));
+            return ReadProfilesWithReader(config, profile => ReadAny(profile, () => cli, data), null);
+        }
+        // Claude accounts read the subscription usage API and local Claude Code logs;
+        // Codex accounts keep the app-server RPC path. A missing Codex CLI only fails Codex accounts.
+        public static object ReadAny(object profile, Func<string> cli, string data) {
+            if (Text(Get(profile, "provider")) == "claude") return ClaudeReader.ReadProfile(profile, data);
+            string path = cli();
+            if (path == null) throw new FileNotFoundException("未找到 Codex CLI，请打开“账号与首次使用”安装。");
+            return ConvertResult(profile, ReadRpc(ServerInfo(path, Home(Text(Get(profile, "codexHome"))))));
         }
         public static object ReadProfilesWithReader(string config, Func<object, object> readProfile, Action<object, bool> publish) {
             var parsed = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(config, Encoding.UTF8));
@@ -174,11 +183,10 @@ namespace CodexUsageDesktop {
             try {
                 string data = Environment.GetEnvironmentVariable("CODEX_USAGE_DATA_DIR");
                 if (string.IsNullOrWhiteSpace(data)) throw new InvalidOperationException("客户端数据目录未配置。");
-                string cli = FindCli();
-                if (cli == null) throw new FileNotFoundException("未找到 Codex CLI，请打开“账号与首次使用”安装。");
+                var cli = new Lazy<string>(() => FindCli());
                 int revision = 0;
                 ReadProfilesWithReader(Path.Combine(data, "profiles.json"),
-                    profile => ConvertResult(profile, ReadRpc(ServerInfo(cli, Home(Text(Get(profile, "codexHome")))))),
+                    profile => ReadAny(profile, () => cli.Value, data),
                     (snapshot, pending) => Client.AtomicJson(output, new { ok = true, readId, pending, revision = ++revision, data = snapshot }));
                 return 0;
             } catch (Exception ex) { Client.AtomicJson(output, new { ok = false, readId, error = ex.Message }); return 1; }

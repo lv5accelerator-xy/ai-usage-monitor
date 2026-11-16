@@ -65,6 +65,19 @@ function check(condition, message) {
   check(mobileApp.includes('/json?poll=1&since=latest'), 'Latest snapshot fetch must request only the newest cached message.');
   check(!mobileApp.includes('/json?poll=1&since=all'), 'Latest snapshot fetch must not request the full cached history.');
 
+  const mixed = CodexMobileModel.validateSnapshot({
+    version: 1, type: 'usage_snapshot', publishedAt: new Date().toISOString(),
+    profiles: [
+      { id: 'claude', label: 'Claude', ok: true, fiveHour: { kind: '5h', remainingPercent: 80, resetsAt: null }, longTerm: { kind: 'weekly', remainingPercent: 50 }, localUsage: { today: { totalTokens: 1500000, costUsd: 3.2 }, week: { totalTokens: 9e6, costUsd: 21.3 }, path: 'C:\\secret' } },
+      { id: 'future-account', ok: true }
+    ]
+  });
+  check(mixed.profiles.length === 1 && mixed.profiles[0].id === 'claude', 'Claude is accepted and unknown future accounts are skipped, not fatal.');
+  check(mixed.profiles[0].localUsage.today.totalTokens === 1500000 && !('path' in mixed.profiles[0].localUsage), 'Claude local usage keeps only allowlisted aggregate numbers.');
+  check(CodexMobileModel.validateSnapshot({ version: 1, type: 'usage_snapshot', publishedAt: new Date().toISOString(), profiles: [{ id: 'claude', ok: true, localUsage: { today: { totalTokens: 'x' } } }] }).profiles[0].localUsage === null, 'Malformed local usage is dropped.');
+  check(CodexMobileModel.formatTokens(1234567) === '1.2M' && CodexMobileModel.formatUsd(0.001) === '<$0.01', 'Token and cost formatting.');
+  check(mobileApp.includes("'CLAUDE'"), 'Claude cards are labelled.');
+
   process.stdout.write(`Mobile JavaScript: ${checks} checks passed.\n`);
 })().catch((error) => {
   process.stderr.write(`${error.stack || error}\n`);
