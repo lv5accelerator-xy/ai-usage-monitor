@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.1 - 2026-11-16
+
+- Fewer notifications: the read-failure reminder no longer repeats when reads flap (e.g. the Claude usage endpoint rate-limiting while you are idle, then one good read, then failing again). An account is reported at most once every 12 hours, and **额度读取已恢复** only appears after 10 minutes of successful reads.
+- Rate limiting (429) is no longer treated as a read failure; it clears by itself.
+- Read-failure reminders wait while you are away from the computer (no keyboard or mouse input for 10 minutes) and are shown when you are back if the problem persists.
+- **额度已恢复** fires at most once every 3 hours per quota window; the burn-rate early warning tolerates reset times that drift by seconds, so one reset cycle warns once.
+- Every desktop notification is written to the log, which makes any remaining noise easy to trace.
+
 ## 2.1.0 - 2026-11-16
 
 - Beta update channel: right-click **客户端更新 → 接收测试版（先于朋友更新）**. New versions are published as GitHub prereleases and reach only beta clients; the **Promote release to stable** workflow turns a tested prerelease into the latest release for everyone (same binary, no rebuild). Stable clients keep using `releases/latest`, which never returns prereleases.

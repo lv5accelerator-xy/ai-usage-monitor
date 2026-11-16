@@ -461,7 +461,25 @@ namespace CodexUsageDesktop {
         void Balloon(string title, string text, ToolTipIcon icon) {
             if (Smoke) { SmokeBalloons.Add(title + "|" + text); return; }
             if (NotifyIcon == null) return;
+            Log("Notification shown: " + title + " | " + text.Replace("\r\n", " / "));
             NotifyIcon.ShowBalloonTip(8000, title, text, icon);
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        struct LastInputInfo { public uint Size; public uint Time; }
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+        // Away from the keyboard for 10 minutes: read-failure notices wait until the user is back
+        // (the failure is still tracked, so it is reported then if it persists).
+        public const int IdleMinutes = 10;
+        public bool UserActive() {
+            if (Smoke) return true;
+            try {
+                var info = new LastInputInfo { Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(LastInputInfo)) };
+                if (!GetLastInputInfo(ref info)) return true;
+                uint idleMs = unchecked((uint)Environment.TickCount - info.Time);
+                return idleMs < IdleMinutes * 60000u;
+            } catch (Exception) { return true; }
         }
 
         public void ProcessQuotaNotifications(object data) {
@@ -478,12 +496,13 @@ namespace CodexUsageDesktop {
         public Dictionary<string, HealthEntry> HealthState = new Dictionary<string, HealthEntry>();
         public DateTimeOffset? refreshErrorSince;
         public bool refreshErrorNotified;
+        public DateTimeOffset? refreshErrorNoticeAt;
         public readonly List<string> SmokeBalloons = new List<string>();
 
         // Recovery from 0% and accounts that keep failing; independent of the low-quota switch.
         public void ProcessHealthNotifications(object data) {
             try {
-                var alerts = AccountHealth.Track(data, HealthState, AccountName, Settings.RecoveryNotifications, Settings.FailureNotifications, DateTimeOffset.Now);
+                var alerts = AccountHealth.Track(data, HealthState, AccountName, Settings.RecoveryNotifications, Settings.FailureNotifications && UserActive(), DateTimeOffset.Now);
                 foreach (HealthAlert alert in alerts) Balloon(alert.Title, alert.Text, alert.Kind == "failure" ? ToolTipIcon.Warning : ToolTipIcon.Info);
             } catch (Exception ex) { Log("Health notification warning: " + ex.Message); }
         }
@@ -492,8 +511,10 @@ namespace CodexUsageDesktop {
         public void TrackRefreshError(DateTimeOffset now) {
             if (string.IsNullOrEmpty(RefreshError)) { refreshErrorSince = null; refreshErrorNotified = false; return; }
             if (!refreshErrorSince.HasValue) refreshErrorSince = now;
-            if (Settings.FailureNotifications && !refreshErrorNotified && (now - refreshErrorSince.Value).TotalMinutes >= AccountHealth.FailureMinutes) {
+            bool cooled = !refreshErrorNoticeAt.HasValue || (now - refreshErrorNoticeAt.Value).TotalHours >= AccountHealth.FailureCooldownHours;
+            if (Settings.FailureNotifications && !refreshErrorNotified && cooled && UserActive() && (now - refreshErrorSince.Value).TotalMinutes >= AccountHealth.FailureMinutes) {
                 refreshErrorNotified = true;
+                refreshErrorNoticeAt = now;
                 Balloon("额度读取异常", "已连续 " + AccountHealth.FailureMinutes + " 分钟无法刷新额度：" + RefreshError, ToolTipIcon.Warning);
             }
         }
@@ -507,7 +528,10 @@ namespace CodexUsageDesktop {
                 foreach (string kind in new[] { "fiveHour", "weekly" }) {
                     Forecast forecast = ProfileForecast(profile, kind);
                     if (forecast == null || forecast.State != "exhaust" || forecast.MinutesLeft > (kind == "fiveHour" ? 30 : 24 * 60)) continue;
-                    string key = J.Text(J.Get(profile, "id")) + "|" + kind + "|" + J.Text(J.Get(profile, kind, "resetsAt"));
+                    // Reset times can drift by seconds between reads; key on the nearest hour so one cycle warns once.
+                    DateTimeOffset? reset = J.Time(J.Get(profile, kind, "resetsAt"));
+                    string cycle = reset.HasValue ? reset.Value.ToUniversalTime().AddMinutes(30).ToString("yyyy-MM-ddTHH", J.Inv) : "";
+                    string key = J.Text(J.Get(profile, "id")) + "|" + kind + "|" + cycle;
                     if (!forecastAlerted.Add(key)) continue;
                     lines.Add(AccountName(J.Text(J.Get(profile, "id"))) + " · " + (kind == "fiveHour" ? "5 小时额度" : "每周额度") + "按当前速度" + forecast.Text);
                 }

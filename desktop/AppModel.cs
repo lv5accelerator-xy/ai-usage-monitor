@@ -508,12 +508,18 @@ namespace CodexUsageDesktop {
     }
 
     // ------------------------------------------------------------------ recovery + read-failure notifications
-    public sealed class HealthEntry { public double? Last; public DateTimeOffset? LastAt; public DateTimeOffset? FailingSince; public bool FailureNotified; }
+    public sealed class HealthEntry { public double? Last; public DateTimeOffset? LastAt; public DateTimeOffset? FailingSince; public bool FailureNotified; public DateTimeOffset? OkSince, LastNoticeAt; }
 
     public sealed class HealthAlert { public string Id, Kind, Title, Text; }
 
     public static class AccountHealth {
         public const int FailureMinutes = 15;
+        // A failure notice is repeated at most every 12 hours per account, even if reads flap.
+        public const int FailureCooldownHours = 12;
+        // A notified failure counts as fixed only after 10 minutes of successful reads.
+        public const int RestoreMinutes = 10;
+        // A quota window reports "recovered" at most every 3 hours.
+        public const int RecoveryCooldownHours = 3;
 
         public static string FailureHint(string error) {
             string e = error ?? "";
@@ -523,9 +529,16 @@ namespace CodexUsageDesktop {
             return "请检查网络或重新登录这个账号。";
         }
 
+        // Rate limiting is expected while idle (the UI polls every minute) and clears by itself.
+        public static bool Transient(string error) {
+            string e = error ?? "";
+            return e.Contains("限流") || e.Contains("429");
+        }
+
         // Raw (unmerged) reader data only. Recovery: a fresh reading after an exhausted one (0%)
         // shows the window has replenished. Failure: an account that keeps failing for 15 minutes.
-        // The first sample after start-up only establishes a baseline.
+        // The first sample after start-up only establishes a baseline. Flapping reads (fail, one
+        // success, fail again) stay inside one episode and never produce a new pair of notices.
         public static List<HealthAlert> Track(object data, Dictionary<string, HealthEntry> state, Func<string, string> name, bool recovery, bool failures, DateTimeOffset now) {
             var alerts = new List<HealthAlert>();
             foreach (object profile in J.Arr(J.Get(data, "profiles"))) {
@@ -536,18 +549,29 @@ namespace CodexUsageDesktop {
                 HealthEntry account;
                 if (!state.TryGetValue(id, out account)) { account = new HealthEntry(); state[id] = account; }
                 if (!J.Bool(J.Get(profile, "ok"))) {
+                    string error = J.Text(J.Get(profile, "error"));
+                    if (Transient(error)) continue;
+                    account.OkSince = null;
                     if (!account.FailingSince.HasValue) account.FailingSince = now;
-                    if (failures && !account.FailureNotified && (now - account.FailingSince.Value).TotalMinutes >= FailureMinutes) {
+                    bool cooled = !account.LastNoticeAt.HasValue || (now - account.LastNoticeAt.Value).TotalHours >= FailureCooldownHours;
+                    if (failures && !account.FailureNotified && cooled && (now - account.FailingSince.Value).TotalMinutes >= FailureMinutes) {
                         account.FailureNotified = true;
-                        string error = J.Text(J.Get(profile, "error"));
+                        account.LastNoticeAt = now;
                         alerts.Add(new HealthAlert { Id = id, Kind = "failure", Title = "额度读取异常", Text = label + " 已连续 " + FailureMinutes + " 分钟无法读取额度。" + FailureHint(error) });
                     }
                     continue;
                 }
-                bool wasFailing = account.FailureNotified;
-                account.FailingSince = null;
-                account.FailureNotified = false;
-                if (wasFailing && failures) alerts.Add(new HealthAlert { Id = id, Kind = "restored", Title = "额度读取已恢复", Text = label + " 已重新连接，数据已更新。" });
+                if (account.FailureNotified) {
+                    if (!account.OkSince.HasValue) account.OkSince = now;
+                    if ((now - account.OkSince.Value).TotalMinutes >= RestoreMinutes) {
+                        account.FailureNotified = false;
+                        account.FailingSince = null;
+                        account.OkSince = null;
+                        if (failures) alerts.Add(new HealthAlert { Id = id, Kind = "restored", Title = "额度读取已恢复", Text = label + " 已重新连接，数据已更新。" });
+                    }
+                } else {
+                    account.FailingSince = null;
+                }
                 foreach (string kind in new[] { "fiveHour", "weekly" }) {
                     double? value = J.Num(J.Get(profile, kind, "remainingPercent"));
                     DateTimeOffset? at = J.Time(J.Get(profile, "fetchedAt"));
@@ -556,8 +580,11 @@ namespace CodexUsageDesktop {
                     HealthEntry window;
                     if (!state.TryGetValue(key, out window)) { window = new HealthEntry(); state[key] = window; }
                     if (window.LastAt.HasValue && at.Value <= window.LastAt.Value) continue;
-                    if (recovery && window.Last.HasValue && window.Last.Value <= 0 && value.Value > 0)
+                    bool cooled = !window.LastNoticeAt.HasValue || (now - window.LastNoticeAt.Value).TotalHours >= RecoveryCooldownHours;
+                    if (recovery && cooled && window.Last.HasValue && window.Last.Value <= 0 && value.Value > 0) {
+                        window.LastNoticeAt = now;
                         alerts.Add(new HealthAlert { Id = id, Kind = "recovered", Title = "额度已恢复", Text = label + " · " + (kind == "fiveHour" ? "5 小时" : "每周") + "额度已恢复，剩余 " + Model.Percent(value) + "。" });
+                    }
                     window.Last = value;
                     window.LastAt = at;
                 }

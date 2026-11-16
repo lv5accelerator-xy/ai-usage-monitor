@@ -260,10 +260,20 @@ Assert-Equal @($H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$true,$f
 $fail = @($H::Track((HSample $f0 0 $false 'Claude 登录已过期：打开 Claude Code 运行一次'),$health,$name,$true,$true,$f0.AddMinutes(15)))
 Assert-True ($fail.Count -eq 1 -and $fail[0].Kind -eq 'failure' -and $fail[0].Text -match '个人' -and $fail[0].Text -match 'Claude Code 运行一次') 'Fifteen minutes of failures notifies once with a recovery hint'
 Assert-Equal @($H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$true,$f0.AddMinutes(40))).Count 0 'One failure episode notifies once'
-$back = @($H::Track((HSample $f0.AddMinutes(41) 80),$health,$name,$true,$true,$f0.AddMinutes(41)))
-Assert-True ($back.Count -eq 1 -and $back[0].Kind -eq 'restored') 'A notified failure reports when the account reconnects'
-[void]$H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$false,$f0.AddMinutes(50))
-Assert-Equal @($H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$false,$f0.AddMinutes(70))).Count 0 'Failure notifications can be turned off'
+Assert-Equal @($H::Track((HSample $f0.AddMinutes(41) 80),$health,$name,$true,$true,$f0.AddMinutes(41))).Count 0 'A single good read after a failure is not yet a reconnection'
+Assert-Equal @($H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$true,$f0.AddMinutes(42))).Count 0 'Flapping reads stay inside one failure episode'
+Assert-Equal @($H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$true,$f0.AddMinutes(60))).Count 0 'Flapping reads do not notify again'
+[void]$H::Track((HSample $f0.AddMinutes(61) 80),$health,$name,$true,$true,$f0.AddMinutes(61))
+$back = @($H::Track((HSample $f0.AddMinutes(71) 79),$health,$name,$true,$true,$f0.AddMinutes(71)))
+Assert-True ($back.Count -eq 1 -and $back[0].Kind -eq 'restored') 'A notified failure reports reconnection after ten minutes of good reads'
+Assert-Equal @($H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$true,$f0.AddMinutes(72))).Count 0 'A new failure starts silently'
+Assert-Equal @($H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$true,$f0.AddMinutes(100))).Count 0 'A repeated failure within 12 hours is not notified again'
+$coolHealth = New-Object 'System.Collections.Generic.Dictionary[string,CodexUsageDesktop.HealthEntry]'
+[void]$H::Track((HSample $f0 0 $false 'Claude 用量接口暂时限流，稍后会自动重试。'),$coolHealth,$name,$true,$true,$f0)
+Assert-Equal @($H::Track((HSample $f0 0 $false 'Claude 用量接口暂时限流，稍后会自动重试。'),$coolHealth,$name,$true,$true,$f0.AddMinutes(30))).Count 0 'Rate limiting never counts as a read failure'
+$offHealth = New-Object 'System.Collections.Generic.Dictionary[string,CodexUsageDesktop.HealthEntry]'
+[void]$H::Track((HSample $f0 0 $false 'x'),$offHealth,$name,$true,$false,$f0.AddMinutes(50))
+Assert-Equal @($H::Track((HSample $f0 0 $false 'x'),$offHealth,$name,$true,$false,$f0.AddMinutes(70))).Count 0 'Failure notifications can be turned off'
 Assert-Equal @($H::Track((T @{ profiles = @(@{ id = 'personal'; ok = $false; pending = $true }) }),$health,$name,$true,$true,$f0.AddMinutes(90))).Count 0 'Pending reads are neither failures nor successes'
 Assert-True ($H::FailureHint('未找到 Codex CLI') -match '账号与首次使用') 'Codex CLI failures point to setup'
 $channelSettings = [CodexUsageDesktop.UiSettings]::FromObject((T @{ updateChannel = 'beta'; recoveryNotifications = $false }),440,840)
