@@ -238,6 +238,38 @@ $fresh['profiles'][0]['individualLimit'] = (T @{ limit = 0; remainingPercent = 0
 [void](Alerts $fresh $state)
 Assert-Equal $state.ContainsKey('personal|fixture|individualLimit') $false 'Meaningless monthly limits are excluded'
 
+# ---------------------------------------------------------------- recovery + read-failure notifications
+$H = [CodexUsageDesktop.AccountHealth]
+$health = New-Object 'System.Collections.Generic.Dictionary[string,CodexUsageDesktop.HealthEntry]'
+$hnow = [DateTimeOffset]::Now
+function HSample([DateTimeOffset]$At,$Five,[bool]$Ok = $true,[string]$Error = '') {
+  if ($Ok) { return ,(T @{ profiles = @(@{ id = 'personal'; ok = $true; fetchedAt = $At.ToString('o'); fiveHour = @{ remainingPercent = $Five }; weekly = @{ remainingPercent = 50 } }) }) }
+  return ,(T @{ profiles = @(@{ id = 'personal'; ok = $false; error = $Error }) })
+}
+$name = [Func[string,string]]{ param($id) '个人' }
+Assert-Equal @($H::Track((HSample $hnow 0),$health,$name,$true,$true,$hnow)).Count 0 'The first sample only sets a baseline'
+Assert-Equal @($H::Track((HSample $hnow 5),$health,$name,$true,$true,$hnow)).Count 0 'Replaying the same timestamp cannot fabricate a recovery'
+$rec = @($H::Track((HSample $hnow.AddMinutes(1) 37),$health,$name,$true,$true,$hnow.AddMinutes(1)))
+Assert-True ($rec.Count -eq 1 -and $rec[0].Kind -eq 'recovered' -and $rec[0].Text -match '5 小时额度已恢复，剩余 37%') 'Exhausted 5h quota that replenishes notifies once'
+Assert-Equal @($H::Track((HSample $hnow.AddMinutes(2) 30),$health,$name,$true,$true,$hnow.AddMinutes(2))).Count 0 'Ordinary decreases are silent'
+[void]$H::Track((HSample $hnow.AddMinutes(3) 0),$health,$name,$false,$true,$hnow.AddMinutes(3))
+Assert-Equal @($H::Track((HSample $hnow.AddMinutes(4) 60),$health,$name,$false,$true,$hnow.AddMinutes(4))).Count 0 'Recovery notifications can be turned off'
+$f0 = $hnow.AddMinutes(10)
+Assert-Equal @($H::Track((HSample $f0 0 $false 'Claude 登录已过期：打开 Claude Code 运行一次'),$health,$name,$true,$true,$f0)).Count 0 'A short failure is silent'
+Assert-Equal @($H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$true,$f0.AddMinutes(14))).Count 0 'Fourteen minutes is still silent'
+$fail = @($H::Track((HSample $f0 0 $false 'Claude 登录已过期：打开 Claude Code 运行一次'),$health,$name,$true,$true,$f0.AddMinutes(15)))
+Assert-True ($fail.Count -eq 1 -and $fail[0].Kind -eq 'failure' -and $fail[0].Text -match '个人' -and $fail[0].Text -match 'Claude Code 运行一次') 'Fifteen minutes of failures notifies once with a recovery hint'
+Assert-Equal @($H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$true,$f0.AddMinutes(40))).Count 0 'One failure episode notifies once'
+$back = @($H::Track((HSample $f0.AddMinutes(41) 80),$health,$name,$true,$true,$f0.AddMinutes(41)))
+Assert-True ($back.Count -eq 1 -and $back[0].Kind -eq 'restored') 'A notified failure reports when the account reconnects'
+[void]$H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$false,$f0.AddMinutes(50))
+Assert-Equal @($H::Track((HSample $f0 0 $false 'x'),$health,$name,$true,$false,$f0.AddMinutes(70))).Count 0 'Failure notifications can be turned off'
+Assert-Equal @($H::Track((T @{ profiles = @(@{ id = 'personal'; ok = $false; pending = $true }) }),$health,$name,$true,$true,$f0.AddMinutes(90))).Count 0 'Pending reads are neither failures nor successes'
+Assert-True ($H::FailureHint('未找到 Codex CLI') -match '账号与首次使用') 'Codex CLI failures point to setup'
+$channelSettings = [CodexUsageDesktop.UiSettings]::FromObject((T @{ updateChannel = 'beta'; recoveryNotifications = $false }),440,840)
+Assert-True ($channelSettings.UpdateChannel -eq 'beta' -and -not $channelSettings.RecoveryNotifications -and $channelSettings.FailureNotifications) 'Channel and notification switches persist; defaults are on'
+Assert-Equal ([CodexUsageDesktop.UiSettings]::FromObject((T @{ updateChannel = 'nightly' }),440,840)).UpdateChannel 'stable' 'Unknown channels fall back to stable'
+
 # ---------------------------------------------------------------- burn-rate forecast
 $base = [DateTimeOffset]::new(2026,11,16,12,0,0,[TimeSpan]::Zero)
 $reset5 = $base.AddHours(3).ToString('o')

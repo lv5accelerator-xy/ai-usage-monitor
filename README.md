@@ -2,7 +2,13 @@
 
 Windows desktop quota monitor for two ChatGPT/Codex accounts (Personal + Work) and one Claude account.
 
-Current version: **v2.0.2**
+Current version: **v2.1.0**
+
+## v2.1.0: beta channel and more reminders
+
+- **Beta channel.** Every new version is first published as a prerelease. Only clients with **客户端更新 → 接收测试版** enabled receive it. After testing, run the **Promote release to stable** GitHub Actions workflow (or ask for it) and all other clients update automatically. Friends stay on the stable channel by default.
+- **Quota recovered.** A notification when a used-up 5-hour or weekly quota becomes available again.
+- **Read failures.** A notification when an account (or the whole reader) has failed for 15 minutes, with a hint for the likely cause, and another when it reconnects. Both reminders can be turned off under right-click **通知**.
 
 ## v2.0.0: native C# client
 
@@ -48,6 +54,8 @@ History: v0.5–v1.1 migrated the reader, updater, window integration and drawin
 Releases include `READ-ME.txt` and `SHA256SUMS.txt` alongside the EXE and update manifest. Checksums verify consistency, not publisher identity.
 
 ### Automatic client updates
+
+- New versions are published as **prereleases** first and reach only clients with **客户端更新 → 接收测试版** enabled. The **Promote release to stable** workflow (Actions → Run workflow, optional tag) marks a tested prerelease as the latest stable release; stable clients then update as usual. The promoted binary is identical to the tested one.
 
 - Checks the repository's latest stable GitHub Release after startup and every six hours. This is background polling, not server push.
 - Downloads newer versions automatically and verifies the size, SHA-256 checksum, and embedded executable version.

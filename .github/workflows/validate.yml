@@ -105,6 +105,10 @@ jobs:
             exists=true
           fi
           cat > release-notes.md <<'NOTES'
+          测试版：本版本先发布给开启“接收测试版”的电脑；确认稳定后转为正式版，其他电脑才会自动更新。
+
+          v2.1.0：新增测试版通道（右键“客户端更新 → 接收测试版”，新版本先推送给你，确认后再转正式版推给朋友）；新增额度用完后恢复提醒、账号连续 15 分钟读取失败提醒，可在右键“通知”中开关。
+
           v2.0.2：本机没有会话记录时不再显示 “0 tokens · $0.00” 和空白趋势图。Claude 卡片会说明云端会话（Claude 应用 / 网页）不写入本机日志，实际用量以 5 小时 / 每周额度为准。
 
           v2.0.1：修复本机 Codex 用量一直显示 0：现在会读取 Codex 桌面应用的会话记录（~/.codex/sessions），并按账号分别统计。
@@ -134,8 +138,10 @@ jobs:
           This build is unsigned. The SHA-256 digest is in SHA256SUMS.txt and update.json. Windows may show a publisher/reputation prompt on first launch.
           NOTES
           if [[ "$exists" == false ]]; then
-            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Codex + Claude Usage $tag" --notes-file release-notes.md --draft
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Codex + Claude Usage $tag" --notes-file release-notes.md --draft --prerelease
           fi
           gh release upload "$tag" dist/CodexUsage.exe dist/update.json dist/SHA256SUMS.txt dist/READ-ME.txt --repo "$GITHUB_REPOSITORY" --clobber
-          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          # New versions start as prereleases: only clients on the beta channel receive them.
+          # Run the "Promote release to stable" workflow to deliver a tested build to everyone.
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
 

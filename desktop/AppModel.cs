@@ -507,6 +507,65 @@ namespace CodexUsageDesktop {
         }
     }
 
+    // ------------------------------------------------------------------ recovery + read-failure notifications
+    public sealed class HealthEntry { public double? Last; public DateTimeOffset? LastAt; public DateTimeOffset? FailingSince; public bool FailureNotified; }
+
+    public sealed class HealthAlert { public string Id, Kind, Title, Text; }
+
+    public static class AccountHealth {
+        public const int FailureMinutes = 15;
+
+        public static string FailureHint(string error) {
+            string e = error ?? "";
+            if (e.Contains("登录已过期") || e.Contains("/login")) return "打开 Claude Code 运行一次即可恢复。";
+            if (e.Contains("Codex CLI")) return "请在“账号与首次使用”中安装或登录 Codex。";
+            if (e.Contains("未检测到 Claude Code")) return "请安装 Claude Code 并登录订阅账号。";
+            return "请检查网络或重新登录这个账号。";
+        }
+
+        // Raw (unmerged) reader data only. Recovery: a fresh reading after an exhausted one (0%)
+        // shows the window has replenished. Failure: an account that keeps failing for 15 minutes.
+        // The first sample after start-up only establishes a baseline.
+        public static List<HealthAlert> Track(object data, Dictionary<string, HealthEntry> state, Func<string, string> name, bool recovery, bool failures, DateTimeOffset now) {
+            var alerts = new List<HealthAlert>();
+            foreach (object profile in J.Arr(J.Get(data, "profiles"))) {
+                if (profile == null || J.Bool(J.Get(profile, "pending"))) continue;
+                string id = J.Text(J.Get(profile, "id"));
+                if (id.Length == 0) continue;
+                string label = name != null ? name(id) : id;
+                HealthEntry account;
+                if (!state.TryGetValue(id, out account)) { account = new HealthEntry(); state[id] = account; }
+                if (!J.Bool(J.Get(profile, "ok"))) {
+                    if (!account.FailingSince.HasValue) account.FailingSince = now;
+                    if (failures && !account.FailureNotified && (now - account.FailingSince.Value).TotalMinutes >= FailureMinutes) {
+                        account.FailureNotified = true;
+                        string error = J.Text(J.Get(profile, "error"));
+                        alerts.Add(new HealthAlert { Id = id, Kind = "failure", Title = "额度读取异常", Text = label + " 已连续 " + FailureMinutes + " 分钟无法读取额度。" + FailureHint(error) });
+                    }
+                    continue;
+                }
+                bool wasFailing = account.FailureNotified;
+                account.FailingSince = null;
+                account.FailureNotified = false;
+                if (wasFailing && failures) alerts.Add(new HealthAlert { Id = id, Kind = "restored", Title = "额度读取已恢复", Text = label + " 已重新连接，数据已更新。" });
+                foreach (string kind in new[] { "fiveHour", "weekly" }) {
+                    double? value = J.Num(J.Get(profile, kind, "remainingPercent"));
+                    DateTimeOffset? at = J.Time(J.Get(profile, "fetchedAt"));
+                    if (!value.HasValue || !at.HasValue) continue;
+                    string key = id + "|" + kind;
+                    HealthEntry window;
+                    if (!state.TryGetValue(key, out window)) { window = new HealthEntry(); state[key] = window; }
+                    if (window.LastAt.HasValue && at.Value <= window.LastAt.Value) continue;
+                    if (recovery && window.Last.HasValue && window.Last.Value <= 0 && value.Value > 0)
+                        alerts.Add(new HealthAlert { Id = id, Kind = "recovered", Title = "额度已恢复", Text = label + " · " + (kind == "fiveHour" ? "5 小时" : "每周") + "额度已恢复，剩余 " + Model.Percent(value) + "。" });
+                    window.Last = value;
+                    window.LastAt = at;
+                }
+            }
+            return alerts;
+        }
+    }
+
     // ------------------------------------------------------------------ remote crypto (wire-compatible with v0.7+)
     public static class RemoteCrypto {
         public static byte[] Sha256(string text) { using (var sha = SHA256.Create()) return sha.ComputeHash(Encoding.UTF8.GetBytes(text)); }
@@ -753,7 +812,8 @@ namespace CodexUsageDesktop {
         public int? BallX, BallY, PanelX, PanelY;
         public int PanelWidth = 440, PanelHeight = 840, CompactOpacity = 80;
         public bool TopMost = true, BallVisible = true, SetupSeen, HideFullscreen, RingMode, CompactMode = true, ClearMode = true, EdgeSnap = true, NotificationsEnabled;
-        public string MonitorSize = "small", DockHorizontal = "none", DockVertical = "none";
+        public bool RecoveryNotifications = true, FailureNotifications = true;
+        public string MonitorSize = "small", DockHorizontal = "none", DockVertical = "none", UpdateChannel = "stable";
         public int[] NotificationThresholds = { 20, 10 };
 
         static int? Int(object value) { double? n = J.Num(value); return n.HasValue ? (int?)(int)Math.Round(n.Value) : null; }
@@ -772,6 +832,9 @@ namespace CodexUsageDesktop {
             s.RingMode = BoolOr(value, "ringMode", false); s.CompactMode = BoolOr(value, "compactMode", true);
             s.ClearMode = BoolOr(value, "clearMode", true); s.EdgeSnap = BoolOr(value, "edgeSnap", true);
             s.NotificationsEnabled = BoolOr(value, "notificationsEnabled", false);
+            s.RecoveryNotifications = BoolOr(value, "recoveryNotifications", true);
+            s.FailureNotifications = BoolOr(value, "failureNotifications", true);
+            s.UpdateChannel = J.Text(J.Get(value, "updateChannel")) == "beta" ? "beta" : "stable";
             s.CompactOpacity = Math.Max(40, Math.Min(100, Int(J.Get(value, "compactOpacity")) ?? 80));
             string size = J.Text(J.Get(value, "monitorSize"));
             s.MonitorSize = size == "medium" || size == "large" ? size : "small";
@@ -789,7 +852,8 @@ namespace CodexUsageDesktop {
                 { "ballX", BallX }, { "ballY", BallY }, { "panelX", PanelX }, { "panelY", PanelY }, { "panelWidth", PanelWidth }, { "panelHeight", PanelHeight },
                 { "topMost", TopMost }, { "ballVisible", BallVisible }, { "setupSeen", SetupSeen }, { "hideFullscreen", HideFullscreen }, { "ringMode", RingMode },
                 { "compactMode", CompactMode }, { "compactOpacity", CompactOpacity }, { "clearMode", ClearMode }, { "monitorSize", MonitorSize }, { "edgeSnap", EdgeSnap },
-                { "dockHorizontal", DockHorizontal }, { "dockVertical", DockVertical }, { "notificationsEnabled", NotificationsEnabled }, { "notificationThresholds", NotificationThresholds }
+                { "dockHorizontal", DockHorizontal }, { "dockVertical", DockVertical }, { "notificationsEnabled", NotificationsEnabled }, { "notificationThresholds", NotificationThresholds },
+                { "recoveryNotifications", RecoveryNotifications }, { "failureNotifications", FailureNotifications }, { "updateChannel", UpdateChannel }
             };
         }
 

@@ -83,7 +83,7 @@ namespace CodexUsageDesktop {
 
         static void Basics() {
             fixtureTime = DateTimeOffset.Now.ToString("o");
-            resetTime = DateTimeOffset.Now.AddHours(2).ToString("o");
+            resetTime = DateTimeOffset.Now.AddHours(2).AddSeconds(30).ToString("o");
             sample = Sample();
             settingsBefore = Snapshot(Path.Combine(app.DataDir, "ui-settings.json"));
             remoteBefore = Snapshot(app.RemoteSettingsPath);
@@ -284,6 +284,29 @@ namespace CodexUsageDesktop {
             app.ThresholdItems[1].PerformClick();
             Check(string.Join(",", app.Settings.NotificationThresholds) == "10" && app.ThresholdItems.Count(i => i.Checked) == 1, "Threshold presets update settings with one selection.");
             app.ItemNotifications.PerformClick();
+            Check(app.ItemRecovery.Checked && app.ItemFailure.Checked && app.Settings.RecoveryNotifications && app.Settings.FailureNotifications, "Recovery and read-failure reminders are on by default.");
+            app.ItemRecovery.PerformClick();
+            Check(!app.Settings.RecoveryNotifications, "Recovery reminders can be turned off.");
+            app.ItemRecovery.PerformClick();
+            Check(!app.ItemBeta.Checked && app.Settings.UpdateChannel == "stable", "Clients start on the stable update channel.");
+            app.ItemBeta.PerformClick();
+            Check(app.Settings.UpdateChannel == "beta", "The beta toggle switches the update channel.");
+            app.ItemBeta.PerformClick();
+            Check(app.Settings.UpdateChannel == "stable", "The beta toggle switches back to stable.");
+            // Recovery from 0% and a 15-minute reader outage produce one notification each.
+            app.SmokeBalloons.Clear();
+            string before = DateTimeOffset.Now.AddMinutes(-2).ToString("o"), after = DateTimeOffset.Now.AddMinutes(-1).ToString("o");
+            app.ProcessHealthNotifications(D("profiles", new object[] { D("id", "work", "ok", true, "fetchedAt", before, "fiveHour", D("remainingPercent", 0)) }));
+            app.ProcessHealthNotifications(D("profiles", new object[] { D("id", "work", "ok", true, "fetchedAt", after, "fiveHour", D("remainingPercent", 64)) }));
+            Check(app.SmokeBalloons.Count == 1 && app.SmokeBalloons[0].StartsWith("额度已恢复|工作") && app.SmokeBalloons[0].Contains("64%"), "Quota recovery after exhaustion notifies with the account name.");
+            app.RefreshError = "Fixture: reader crashed";
+            app.refreshErrorSince = DateTimeOffset.Now.AddMinutes(-16);
+            app.TrackRefreshError(DateTimeOffset.Now);
+            app.TrackRefreshError(DateTimeOffset.Now);
+            Check(app.SmokeBalloons.Count == 2 && app.SmokeBalloons[1].StartsWith("额度读取异常|"), "A 15-minute reader outage notifies once.");
+            app.RefreshError = "";
+            app.TrackRefreshError(DateTimeOffset.Now);
+            Check(!app.refreshErrorSince.HasValue && !app.refreshErrorNotified, "A successful refresh rearms the outage reminder.");
             app.Popup.Show();
             app.SetMonitorExpanded(true);
         }
@@ -365,10 +388,12 @@ namespace CodexUsageDesktop {
                 }
             } finally { app.Ball.ApplyDpi(originalDpi, new Rectangle(app.Ball.Left, app.Ball.Top, 60 * originalDpi / 96, 328 * originalDpi / 96)); }
             var tooltip = (Dictionary<string, object>)Clone(sample);
+            // Half-hour offsets keep the countdown text stable however close in time both sides compute it.
             ((Dictionary<string, object>)P(tooltip, 1)["weekly"])["resetsAt"] = DateTimeOffset.Now.AddDays(3).AddHours(1).AddMinutes(30).ToString("o");
             ((Dictionary<string, object>)P(tooltip, 1)["individualLimit"])["resetsAt"] = DateTimeOffset.Now.AddDays(20).AddHours(1).AddMinutes(30).ToString("o");
             app.UpdateBallSummary(tooltip);
-            Check(app.ToolTip.GetToolTip(app.RingCells["work-long"]).EndsWith(Model.ResetText(J.Get(P(tooltip, 1), "weekly", "resetsAt"))), "Weekly-limited ring tooltip uses the weekly reset.");
+            string weeklyTip = app.ToolTip.GetToolTip(app.RingCells["work-long"]), weeklyExpected = Model.ResetText(J.Get(P(tooltip, 1), "weekly", "resetsAt"));
+            Check(weeklyTip.EndsWith(weeklyExpected), "Weekly-limited ring tooltip uses the weekly reset. expected=" + weeklyExpected + " actual=" + weeklyTip.Replace("\r\n", " | "));
             ((Dictionary<string, object>)P(tooltip, 1)["individualLimit"])["remainingPercent"] = 10;
             app.UpdateBallSummary(tooltip);
             Check(app.ToolTip.GetToolTip(app.RingCells["work-long"]).EndsWith(Model.ResetText(J.Get(P(tooltip, 1), "individualLimit", "resetsAt"))), "Monthly-limited ring tooltip uses the monthly reset.");

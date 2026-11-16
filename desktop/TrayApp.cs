@@ -73,7 +73,7 @@ namespace CodexUsageDesktop {
         public readonly List<CardState> CardStates = new List<CardState>();
         public readonly Dictionary<string, ToolStripMenuItem> SizeItems = new Dictionary<string, ToolStripMenuItem>();
         public readonly List<ToolStripMenuItem> ThresholdItems = new List<ToolStripMenuItem>();
-        public ToolStripMenuItem ItemCompact, ItemRings, ItemClear, ItemSnap, ItemNotifications, ItemBallVisible, ItemTopMost, ItemStartup, ItemFullscreen, ClientStatusItem, CheckUpdateItem, RestartUpdateItem;
+        public ToolStripMenuItem ItemCompact, ItemRings, ItemClear, ItemSnap, ItemNotifications, ItemBallVisible, ItemTopMost, ItemStartup, ItemFullscreen, ClientStatusItem, CheckUpdateItem, RestartUpdateItem, ItemRecovery, ItemFailure, ItemBeta;
         public TrackBar OpacitySlider;
         Label opacityLabel;
         public System.Windows.Forms.Timer HoverTimer, StatusTimer, PollTimer, PeriodicTimer, InitialTimer, ClientTimer;
