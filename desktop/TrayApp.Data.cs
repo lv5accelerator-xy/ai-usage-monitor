@@ -61,7 +61,8 @@ namespace CodexUsageDesktop {
             string detail = Model.LocalUsageDetail(usage, provider);
             string title = provider == "codex" ? "本机 Codex 用量" : "本机 Claude Code 用量";
             AddRow(parent, 58);
-            Label local = NewLabel(title + "\r\n" + Model.LocalUsageSummary(usage), 9, true);
+            bool empty = Model.LocalUsageEmpty(usage);
+            Label local = NewLabel(title + "\r\n" + Model.LocalUsageSummary(usage, provider), 9, true);
             parent.Controls.Add(local, 0, row);
             parent.SetColumnSpan(local, 2);
             ToolTip.SetToolTip(local, detail);
@@ -69,6 +70,7 @@ namespace CodexUsageDesktop {
             UsageTrend trend = Model.Trend(usage, DateTime.Today);
             var chart = new UsageSparkline { Dock = DockStyle.Fill, Margin = new Padding(0, U(4), 0, U(2)), BarColor = accent, TrackColor = Track, CaptionColor = Caption, HighlightIndex = trend.Highlight, AccessibleName = title + " 近 7 天趋势" };
             chart.SetData(trend.Values, trend.Labels);
+            chart.Visible = !empty;
             parent.Controls.Add(chart, 0, row + 1);
             parent.SetColumnSpan(chart, 2);
             ToolTip.SetToolTip(chart, detail);
@@ -211,7 +213,7 @@ namespace CodexUsageDesktop {
                 foreach (object extra in J.Arr(J.Get(profile, "windows")))
                     if (extra != null && J.Text(J.Get(extra, "kind")).StartsWith("weekly-")) tip += "\r\n" + J.Text(J.Get(extra, "label")) + "剩余：" + Model.Percent(J.Get(extra, "remainingPercent"));
                 if (isClaude && J.Text(J.Get(profile, "quotaError")).Trim().Length > 0) tip += "\r\n" + J.Text(J.Get(profile, "quotaError"));
-                if (J.Get(profile, "localUsage") != null) tip += "\r\n" + Model.LocalUsageSummary(J.Get(profile, "localUsage"));
+                if (J.Get(profile, "localUsage") != null) tip += "\r\n" + Model.LocalUsageSummary(J.Get(profile, "localUsage"), isClaude ? "claude" : "codex");
                 if (stale && errorShown) tip += "\r\n数据未更新，请刷新后确认。";
                 Forecast fiveForecast = ProfileForecast(profile, "fiveHour"), longForecast = ProfileForecast(profile, "weekly");
                 tip += "\r\n" + Forecasts.Detail(longForecast).Replace("消耗预测", "每周消耗预测");

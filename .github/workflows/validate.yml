@@ -105,6 +105,8 @@ jobs:
             exists=true
           fi
           cat > release-notes.md <<'NOTES'
+          v2.0.2：本机没有会话记录时不再显示 “0 tokens · $0.00” 和空白趋势图。Claude 卡片会说明云端会话（Claude 应用 / 网页）不写入本机日志，实际用量以 5 小时 / 每周额度为准。
+
           v2.0.1：修复本机 Codex 用量一直显示 0：现在会读取 Codex 桌面应用的会话记录（~/.codex/sessions），并按账号分别统计。
 
           v2.0.0：界面与后台全部改为原生 C#。启动时不再运行任何 PowerShell 进程（不再出现隐藏的 powershell.exe -ExecutionPolicy Bypass），更不容易被杀毒软件或公司电脑策略拦截；悬浮窗、详情面板、右键菜单、账号设置、远程通知与手机同步全部在 CodexUsage.exe 内运行。原有账号、窗口位置、通知记录和配对设置原样保留；已配对的电脑和手机端继续兼容。只有点击“安装 / 登录”时才会打开登录脚本。
