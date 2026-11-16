@@ -45,6 +45,9 @@ namespace CodexUsageDesktop {
             Application.EnableVisualStyles();
             try {
                 if (args.Length == 2 && args[0] == "--read-usage") return UsageReader.Run(Path.GetFullPath(args[1]));
+                // UI process launched by the installed client (no PowerShell host since v2.0).
+                if (args.Length == 1 && args[0] == "--ui") return TrayApp.Run(Environment.GetEnvironmentVariable("CODEX_USAGE_DATA_DIR") ?? Path.Combine(InstallRoot, "data"), false);
+                if (args.Length == 2 && args[0] == "--ui-smoke") return TrayApp.Run(Path.GetFullPath(args[1]), true);
                 if (args.Length == 1 && args[0] == "--rpc-fixture") return SelfTest.RpcFixture();
                 if (args.Length == 2 && args[0] == "--self-test") return SelfTest.Run(Path.GetFullPath(args[1]));
                 if (args.Length == 2 && args[0] == "--finish-uninstall") return Distribution.FinishUninstall(int.Parse(args[1]));
@@ -87,7 +90,7 @@ namespace CodexUsageDesktop {
                     TryDelete(Path.Combine(InstallRoot, "post-update.pending"));
                     try { if (Rollback(Path.Combine(InstallRoot, ExeName))) return 1; } catch (Exception rollbackError) { Log(rollbackError.ToString()); }
                 }
-                MessageBox.Show("客户端启动失败：\r\n" + ex.Message + "\r\n\r\n日志：" + LogPath, "Codex 额度", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("客户端启动失败：\r\n" + ex.Message + "\r\n\r\n日志：" + LogPath, "Codex + Claude 额度", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }
         }
@@ -110,7 +113,7 @@ namespace CodexUsageDesktop {
                     if (!ready && (DateTime.UtcNow - started).TotalSeconds > 45) {
                         ui.Kill(); ui.WaitForExit();
                         if (afterUpdate && Rollback(target)) return 1;
-                        throw new InvalidOperationException("界面未能完成启动，请查看 data/logs/tray.log。");
+                        throw new InvalidOperationException("界面未能完成启动，请查看 data\\logs\\tray.log。");
                     }
                     string request = Path.Combine(data, "check-update.request");
                     if (check == null || check.IsCompleted) {
@@ -136,13 +139,14 @@ namespace CodexUsageDesktop {
             }
         }
 
+        // The UI runs in a second instance of this executable; the parent keeps update/rollback control.
         public static Process StartUi(string payload, string data, string token, bool smoke) {
-            var info = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell\\v1.0\\powershell.exe"));
-            info.Arguments = "-NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File " + Quote(Path.Combine(payload, "tray.ps1")) + (smoke ? " -SmokeTest" : "");
+            var info = new ProcessStartInfo(Self, smoke ? "--ui-smoke " + Quote(data) : "--ui");
             info.UseShellExecute = false;
             info.CreateNoWindow = true;
             info.WorkingDirectory = payload;
             info.EnvironmentVariables["CODEX_USAGE_DATA_DIR"] = data;
+            info.EnvironmentVariables["CODEX_USAGE_PAYLOAD_DIR"] = payload;
             info.EnvironmentVariables["CODEX_USAGE_CLIENT_PATH"] = Self;
             info.EnvironmentVariables["CODEX_USAGE_CLIENT_VERSION"] = CurrentVersion;
             info.EnvironmentVariables["CODEX_USAGE_LAUNCH_ID"] = token;
@@ -246,7 +250,7 @@ namespace CodexUsageDesktop {
                     shortcut.TargetPath = target;
                     shortcut.WorkingDirectory = InstallRoot;
                     shortcut.IconLocation = target + ",0";
-                    shortcut.Description = "个人与工作账号的 Codex 额度监视器";
+                    shortcut.Description = "Codex 与 Claude 额度监视器";
                     shortcut.Save();
                 }
             } catch (Exception ex) { Log("Shortcut creation: " + ex.Message); }

@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 # Offline tests for the shared Claude reader: no network, no real credentials.
 $root = Split-Path $PSScriptRoot -Parent
-. (Join-Path $root 'usage-reader.ps1')
-Import-ClaudeReader -Root $root
+. (Join-Path $PSScriptRoot 'support\load-csharp.ps1')
+Import-AppModel -Root $root
 $script:Checks = 0
 function Assert-Claude([bool]$Condition,[string]$Message) {
   if (-not $Condition) { throw $Message }
@@ -176,8 +176,6 @@ try {
   $missing = $false
   try { [void]$reader::ReadProfile($profile,$data,$now) } catch { $missing = $true }
   Assert-Claude $missing 'No login and no local logs is reported as not set up.'
-  $wrapped = Get-ClaudeUsageForProfile -Profile ([pscustomobject]@{ id='claude'; label='Claude'; provider='claude'; claudeHome=$home1 }) -DataRoot $data
-  Assert-Claude ((-not $wrapped.ok) -and $wrapped.error -match 'Claude Code') 'Script-mode wrapper converts setup errors into an account error.'
 } finally {
   $reader::HttpGet = $originalHttp
   Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue

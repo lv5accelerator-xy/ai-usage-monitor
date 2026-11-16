@@ -1,25 +1,17 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-
-set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-if not exist "%PS%" set "PS=powershell.exe"
-
-if not exist "%~dp0launcher.ps1" (
-  echo [ERROR] launcher.ps1 was not found.
-  echo Please download the repository again.
-  pause
-  exit /b 1
+rem Source checkout: build the native client once, then start it.
+rem The installed EXE from the GitHub release is the recommended way to run the app.
+if not exist "%~dp0dist\CodexUsage.exe" (
+  echo Building CodexUsage.exe from source...
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0desktop\build.ps1"
+  if errorlevel 1 (
+    echo [ERROR] Build failed. Please download CodexUsage.exe from the GitHub release instead.
+    pause
+    exit /b 1
+  )
 )
-
-"%PS%" -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0launcher.ps1"
-if errorlevel 1 (
-  echo.
-  echo [ERROR] Codex Dual Usage failed to start.
-  echo Check logs\startup-error.log and logs\tray.log.
-  pause
-  exit /b 1
-)
-
+start "" "%~dp0dist\CodexUsage.exe"
 endlocal
 exit /b 0

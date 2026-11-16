@@ -2,10 +2,10 @@
 setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
-title Codex Dual Usage v0.3.0 - First Run Setup
+title Codex + Claude Usage - First Run Setup
 
 echo =============================================
-echo  Codex Dual Usage v0.3.0 - First Run Setup
+echo  Codex + Claude Usage - First Run Setup
 echo =============================================
 echo.
 echo Step 1/2 - Personal account ^(Codex CLI will be auto-detected/installed if needed^)
@@ -24,7 +24,7 @@ if errorlevel 1 goto :failed
 echo.
 echo =============================================
 echo  Both login steps finished.
-echo  Next: double-click start.bat
+echo  Next: start Codex 额度 from the desktop shortcut
 echo =============================================
 echo.
 pause

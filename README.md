@@ -2,7 +2,14 @@
 
 Windows desktop quota monitor for two ChatGPT/Codex accounts (Personal + Work) and one Claude account.
 
-Current version: **v1.1.0**
+Current version: **v2.0.0**
+
+## v2.0.0: native C# client
+
+- **No PowerShell at runtime.** The floating monitor, detail panel, tray menu, account and remote-notification dialogs, the refresh lifecycle and the cross-device notification / mobile sync worker are now part of `CodexUsage.exe`. Starting the app no longer launches hidden `powershell.exe -ExecutionPolicy Bypass` processes, which security software and managed PCs often block or flag.
+- **Same data, same behavior.** `profiles.json`, `ui-settings.json`, notification history, forecast history and remote settings are read as before; paired PCs and the iPhone PWA keep working (same relay topics and AES-256-CBC + HMAC-SHA256 format, verified against the shared test vector).
+- **Lighter and steadier.** One .NET Framework 4.8 process for the UI plus a short-lived reader per refresh; the background worker runs as a thread instead of a second PowerShell host. Type checking at build time replaces a class of Windows PowerShell 5.1 runtime quirks.
+- **Login helpers stay scripts.** "安装 / 登录" still opens the small `.bat`/`.ps1` helpers for the Codex CLI and Claude Code login, only when you click them.
 
 ## v1.1.0: forecasts and trends
 
@@ -26,7 +33,7 @@ The Claude usage endpoint is the one Claude Code itself uses for its usage view.
 
 [Download the latest CodexUsage.exe](https://github.com/lv5accelerator-xy/codex-dual-usage-dashboard/releases/latest/download/CodexUsage.exe)
 
-Double-click the EXE and select **安装并启动** in the installation window. It installs into `%LOCALAPPDATA%\CodexUsage` and creates desktop and Start menu shortcuts without administrator permissions. The client uses Windows .NET Framework 4.8 / Windows PowerShell 5.1; it does not require a separate .NET 8 or Electron runtime. The packaged client now reads quotas through a native C# background process. The PowerShell WinForms UI and login helpers remain embedded.
+Double-click the EXE and select **安装并启动** in the installation window. It installs into `%LOCALAPPDATA%\CodexUsage` and creates desktop and Start menu shortcuts without administrator permissions. The client is a native .NET Framework 4.8 WinForms application (built into Windows 10/11); it does not require a separate .NET 8 or Electron runtime. Since v2.0 the UI and background worker are C#; only the optional login helpers use Windows PowerShell.
 
 **Upgrading from the script version:** quit the old tray app, put the EXE in the old app folder, and run it once. If present, `ui-settings.json` and `profiles.json` are copied into the client's separate data directory. Existing `.codex-personal` / `.codex-work` login credentials stay where they are; no credentials are bundled or uploaded.
 
@@ -36,7 +43,7 @@ Double-click the EXE and select **安装并启动** in the installation window. 
 
 The client is listed as **Codex 额度** in Windows Settings → Apps. Quit the tray app before uninstalling. Uninstall removes program files and shortcuts while preserving settings and Codex account directories for reinstallation. No administrator privileges are needed.
 
-Version 0.5.1 precompiles the drawing controls during the build. The packaged UI loads a DLL instead of compiling C# source at startup. Since v0.6.0 the packaged quota reader, download updater, window integration and drawing controls are C#. The UI orchestration and login helpers still use PowerShell; this is an incremental migration, not a completed pure C# rewrite or a guarantee against security warnings.
+History: v0.5–v1.1 migrated the reader, updater, window integration and drawing controls to C# step by step; v2.0 completes the migration for the UI and worker. An unsigned EXE can still trigger SmartScreen reputation prompts.
 
 Releases include `READ-ME.txt` and `SHA256SUMS.txt` alongside the EXE and update manifest. Checksums verify consistency, not publisher identity.
 
@@ -153,7 +160,7 @@ v0.9.0 also includes the Windows remote-worker HOME-variable fix from PR #4. Ins
 
 ## Floating monitor
 
-Run `start.bat` to open a compact rounded panel. Aligned columns show the remaining **5-hour** and **long-term** quotas for each account, with a visible update timestamp or stale-data warning.
+Start **Codex 额度** from the desktop shortcut to open a compact rounded panel. Aligned columns show the remaining **5-hour** and **long-term** quotas for each account, with a visible update timestamp or stale-data warning.
 
 | Account | 5-hour remaining | Long-term remaining |
 | --- | ---: | ---: |
@@ -196,7 +203,8 @@ Hover over reset times for the exact local timestamp and monthly used/limit deta
 ## Requirements
 
 - Windows 10/11
-- Windows PowerShell 5.1+
+- .NET Framework 4.8 (included with Windows 10/11)
+- Windows PowerShell 5.1 only for the optional login helpers
 - Codex CLI (for Codex accounts)
 - Claude Code (for the Claude account)
 - The dashboard itself has no Node.js dependency
@@ -208,47 +216,44 @@ Run `first-run-setup.bat` to set up and log in two independent Codex homes:
 - Personal: `%USERPROFILE%\.codex-personal`
 - Work: `%USERPROFILE%\.codex-work`
 
-For the source/script distribution, run `start.bat` normally, or `start-debug.bat` for startup diagnostics. Script mode does not install automatic client updates. Quit the existing tray instance before starting an updated version.
+From a source checkout, `start.bat` builds `dist\CodexUsage.exe` with the Windows C# compiler and starts it. Releases are the recommended way to install and receive automatic updates.
 
 If startup fails, check `logs/startup.log`, `logs/startup-error.log`, `logs/tray.log`, and `logs/worker.log`.
 
 ## Validation
 
-Quota selection, missing values, stale-data retention, recovery, and account ordering are tested without account access:
+Offline tests (no account access, no network) run with Windows PowerShell 5.1 or PowerShell 7:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/ui-model.tests.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/ui-behavior.tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/model.tests.ps1         # quota rules, alerts, forecasts, snapping, mobile snapshot, crypto vector, background worker
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/claude-reader.tests.ps1 # Claude quota + Claude Code / Codex local logs
+node tests/mobile.tests.js                                                             # iPhone PWA
 ```
 
-On Windows, exercise the actual WinForms controls, resizing, and failure/loading states with fixture data:
+Build the EXE and run the native UI smoke test with fixture data:
 
 ```powershell
-powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File tray.ps1 -SmokeTest
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1
+dist\CodexUsage.exe --ui-smoke artifacts\ui-smoke-data   # report: artifacts\ui-smoke-data\logs\smoke-report.txt
+dist\CodexUsage.exe --self-test artifacts\client-self-test
 ```
 
-The smoke test does not start a quota worker, log in, or modify saved UI settings. It writes fixture screenshots to the ignored `artifacts/` directory. GitHub Actions runs both checks using Windows PowerShell 5.1 and publishes screenshots/logs in the `windows-ui-preview` artifact.
+The smoke test drives real WinForms controls, never starts a quota reader, logs in or writes your settings, and saves screenshots. GitHub Actions runs all of the above on Windows and publishes screenshots/logs in the `windows-ui-preview` artifact.
 
 ## Project files
 
-- `desktop/UsageReader.cs` — native packaged quota reader and child-process lifetime control
-- `claude-reader.cs` — Claude quota + local Claude Code usage reader, compiled into the EXE and loaded by script mode
-- `setup-claude.ps1` / `login-claude.bat` — guided Claude Code install and login
-- `ui-experience.ps1` — account preferences, onboarding, recovery refresh and desktop options
-- `tray.ps1` — floating monitor, detail panel, tray actions, refresh lifecycle
-- `ui-model.ps1` — quota selection and account-specific freshness rules
-- `ui-behavior.ps1` — edge snapping and notification crossing/deduplication rules
-- `ui-controls.cs` — small native WinForms drawing controls compiled by PowerShell at startup
-- `usage-reader.ps1` / `usage-worker.ps1` — existing quota reader and background worker
-- `remote-crypto.ps1` / `mobile-sync.ps1` — shared message crypto and allowlisted mobile snapshot queue
-- `remote-worker.ps1` — completion relay plus asynchronous mobile snapshot publishing
+- `desktop/Client.cs` — installer, updater, rollback and process entry points (`--ui`, `--read-usage`, `--ui-smoke`, `--self-test`)
+- `desktop/TrayApp*.cs` — floating monitor, detail panel, tray menu, dialogs, refresh lifecycle, notifications
+- `desktop/AppModel.cs` — quota rules, merge/freshness, alerts, forecasts, snapping, settings, mobile snapshot, crypto
+- `desktop/RemoteWorker.cs` — cross-device completion notifications and mobile sync (background thread)
+- `desktop/UsageReader.cs` — Codex quota reader and child-process lifetime control
+- `claude-reader.cs` — Claude quota + local Claude Code / Codex usage statistics
+- `ui-controls.cs` — native drawing controls (rings, segmented bars, sparkline, HUD menu)
+- `desktop/UiSmoke.cs`, `desktop/SelfTest.cs` — packaged UI smoke test and client self-test
+- `setup-*.ps1`, `login-*.bat`, `codex-tools.ps1`, `install-codex-cli.*` — optional login/installation helpers
 - `mobile/` — static iPhone PWA; no Node.js runtime dependency
-- `codex-tools.ps1` / `setup-account.ps1` — CLI discovery and account login
 - `profiles.json` — account labels and local profile paths
-- `launcher.ps1` — encoding normalization, syntax check, startup watchdog
-- `tests/` — presentation-rule regressions and Windows UI smoke test
-
-The v0.3.9 runtime display patch has been removed. The launcher runs the checked-in UI directly.
+- `tests/` — offline model/worker/reader tests and PWA tests
 
 ## Security
 
@@ -256,5 +261,4 @@ Authentication stays in the user's local Codex profile directories. Never commit
 
 ## GitHub ZIP downloads
 
-Extract **Code → Download ZIP** completely before running `start.bat`. The launcher normalizes PowerShell encoding for Windows PowerShell 5.1 and checks `tray.ps1` syntax before starting the UI. Keep `ui-controls.cs`, `ui-model.ps1`, and `ui-behavior.ps1` next to `tray.ps1`.
-
+Extract **Code → Download ZIP** completely, then run `start.bat`. It compiles `dist\CodexUsage.exe` with the C# compiler that ships with .NET Framework 4.8 and starts the installer. Downloading the release EXE is simpler and receives automatic updates.
