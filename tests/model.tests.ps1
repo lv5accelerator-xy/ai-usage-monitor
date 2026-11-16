@@ -118,6 +118,12 @@ $usage = T @{ today = @{ totalTokens = 2500000; costUsd = 4.5; inputTokens = 1; 
 Assert-Equal $M::LocalUsageSummary($usage) '今日 2.5M tokens · ≈$4.50　近 7 天 12.0M · ≈$30.00' 'Local usage summary'
 Assert-True ($M::LocalUsageDetail($usage,'codex') -match 'OpenAI') 'Codex detail cites OpenAI prices'
 Assert-True ($M::LocalUsageDetail($null,'claude') -match 'Claude Code') 'Empty Claude detail is explicit'
+$emptyUsage = T @{ today = @{ totalTokens = 0; costUsd = 0 }; week = @{ totalTokens = 0; costUsd = 0 }; days = @() }
+Assert-True ($M::LocalUsageEmpty($emptyUsage) -and $M::LocalUsageEmpty($null) -and -not $M::LocalUsageEmpty($usage)) 'Empty seven-day local usage is detected'
+Assert-True ($M::LocalUsageSummary($emptyUsage,'claude') -match '云端会话不计入') 'Empty Claude usage explains cloud sessions instead of 0 tokens'
+Assert-True ($M::LocalUsageSummary($emptyUsage,'codex') -notmatch '0 tokens') 'Empty Codex usage does not show 0 tokens'
+Assert-Equal $M::LocalUsageSummary($usage,'claude') $M::LocalUsageSummary($usage) 'Non-empty usage keeps the token summary'
+Assert-True ($M::LocalUsageDetail($emptyUsage,'claude') -match '云端') 'Empty Claude detail points to the quota'
 $trend = $M::Trend($usage,[DateTime]::Today)
 Assert-True ($trend.Values.Length -eq 7 -and $trend.Values[6] -eq 77 -and $trend.Labels[6] -eq '今' -and $trend.Highlight -eq 6) 'Seven-day trend ends today'
 $claudeProfile = T @{ id = 'claude'; provider = 'claude'; ok = $true; fetchedAt = [DateTimeOffset]::Now.ToString('o'); fiveHour = @{ remainingPercent = 80 }; weekly = @{ remainingPercent = 40 } }

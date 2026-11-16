@@ -147,16 +147,32 @@ namespace CodexUsageDesktop {
             string path = cli();
             if (path == null) throw new FileNotFoundException("未找到 Codex CLI，请打开“账号与首次使用”安装。");
             var converted = (Dictionary<string, object>)ConvertResult(profile, ReadRpc(ServerInfo(path, Home(Text(Get(profile, "codexHome"))))));
-            converted["localUsage"] = CodexLocal(profile, data);
+            converted["localUsage"] = CodexLocal(profile, data, Text(Get(converted, "accountId")));
             return converted;
         }
         // Local Codex session statistics never fail the quota read.
-        public static object CodexLocal(object profile, string data) {
+        // The Codex desktop app keeps all sessions in ~/.codex/sessions, even when the
+        // dashboard reads quota through a per-account CODEX_HOME; sessions are matched
+        // to this account by their creator_account_id.
+        public static object CodexLocal(object profile, string data) { return CodexLocal(profile, data, null); }
+        public static object CodexLocal(object profile, string data, string rpcAccountId) {
             try {
                 string home = Home(Text(Get(profile, "codexHome")));
+                string shared = Home("~/.codex");
+                string account = AuthAccountId(home);
+                if (account.Length == 0) account = rpcAccountId ?? "";
                 string cache = string.IsNullOrWhiteSpace(data) ? null : Path.Combine(data, "codex-local-" + System.Text.RegularExpressions.Regex.Replace(Text(Get(profile, "id")), "[^A-Za-z0-9_-]", "_") + ".json");
-                return ClaudeReader.ScanCodex(Path.Combine(home, "sessions"), cache, DateTime.Now.Date);
+                return ClaudeReader.ScanCodexAccount(Path.Combine(home, "sessions"), Path.Combine(shared, "sessions"), account, AuthAccountId(shared), cache, DateTime.Now.Date);
             } catch (Exception) { return null; }
+        }
+        // Only the non-secret account id is read from auth.json; tokens are ignored.
+        public static string AuthAccountId(string home) {
+            try {
+                string path = Path.Combine(home, "auth.json");
+                if (!File.Exists(path)) return "";
+                object auth = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(path, Encoding.UTF8));
+                return Text(Get(Get(auth, "tokens"), "account_id"));
+            } catch (Exception) { return ""; }
         }
         public static object ReadProfilesWithReader(string config, Func<object, object> readProfile, Action<object, bool> publish) {
             var parsed = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(config, Encoding.UTF8));

@@ -108,7 +108,9 @@
       resets.append(makeElement('dd', '', description));
     });
     card.append(resets);
-    if (profile.localUsage) {
+    if (profile.localUsage && !(Number(profile.localUsage.week && profile.localUsage.week.totalTokens) > 0)) {
+      card.append(makeElement('p', 'local-usage', profile.id === 'claude' ? '本机无 Claude Code 记录 · 云端会话不计入，以额度为准' : '近 7 天无本机会话记录'));
+    } else if (profile.localUsage) {
       const usage = profile.localUsage;
       card.append(makeElement('p', 'local-usage',
         `本机用量 · 今日 ${CodexMobileModel.formatTokens(usage.today.totalTokens)} tokens ≈${CodexMobileModel.formatUsd(usage.today.costUsd)} · 近 7 天 ${CodexMobileModel.formatTokens(usage.week.totalTokens)} ≈${CodexMobileModel.formatUsd(usage.week.costUsd)}`));

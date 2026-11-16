@@ -7,6 +7,14 @@
 - New reminders under right-click **通知** (both on by default, independent of the low-quota switch): **额度恢复提醒** when a 5-hour or weekly quota that was used up replenishes, and **读取异常提醒** when an account (or the whole reader) has failed for 15 minutes, with a recovery hint such as re-running Claude Code after an expired login; a follow-up notice confirms reconnection.
 - The low-quota menu is renamed **通知 → 低额度提醒**.
 
+## 2.0.2 - 2026-11-16
+
+- When there is no local session in the last seven days, the local-usage line no longer shows "0 tokens · $0.00" with an empty chart. The Claude card explains that cloud sessions (Claude app / web) are not written to local logs and that the 5-hour / weekly quota is the real usage figure; Codex cards say there is no local session. Applies to the desktop card, tooltips and the iPhone PWA.
+
+## 2.0.1 - 2026-11-16
+
+- Local Codex usage now includes sessions from the Codex desktop app, which keeps every account's sessions in `~/.codex/sessions`. Previously only the per-account homes (`~/.codex-personal`, `~/.codex-work`) were scanned and the figure stayed at 0. Each session is assigned to its account by `creator_account_id`; only the account id is read from `auth.json`.
+
 ## 2.0.0 - 2026-11-16
 
 - The UI is now native C#: floating monitor (compact / expanded / rings), detail panel, tray menu, account setup and remote-notification dialogs, refresh lifecycle, low-quota and forecast notifications, full-screen hiding, DPI and display recovery. `tray.ps1`, `ui-experience.ps1`, `remote-ui.ps1`, `ui-model.ps1`, `ui-behavior.ps1` and `launcher.ps1` are retired.
