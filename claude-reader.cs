@@ -270,7 +270,7 @@ namespace CodexUsageDesktop {
 
         sealed class Entry { public string Key, Day, Model; public long Input, Output, CacheWrite, CacheRead; }
         // Per-file parser state that must survive incremental reads (Codex only).
-        sealed class FileState { public string Model = ""; public long LastTotal = -1; }
+        sealed class FileState { public string Model = "", Account = ""; public long LastTotal = -1; }
 
         static string LocalDay(string timestamp) {
             DateTimeOffset parsed;
@@ -288,11 +288,19 @@ namespace CodexUsageDesktop {
         // and reasoning output is a subset of output.
         static Entry ParseCodexLine(string line, string fallbackKey, FileState state) {
             bool context = line.IndexOf("\"turn_context\"", StringComparison.Ordinal) >= 0;
-            if (!context && line.IndexOf("\"token_count\"", StringComparison.Ordinal) < 0) return null;
+            bool meta = !context && line.IndexOf("\"session_meta\"", StringComparison.Ordinal) >= 0;
+            if (!context && !meta && line.IndexOf("\"token_count\"", StringComparison.Ordinal) < 0) return null;
             object record;
             try { record = Json().DeserializeObject(line); } catch (ArgumentException) { return null; } catch (InvalidOperationException) { return null; }
             object payload = Get(record, "payload");
             string type = Text(Get(record, "type"));
+            // The Codex desktop app writes every account's sessions into the shared
+            // ~/.codex/sessions; session_meta names the account that created the session.
+            if (type == "session_meta") {
+                string account = Text(Get(payload, "creator_account_id"));
+                if (account.Length > 0) state.Account = account;
+                return null;
+            }
             if (type == "turn_context") {
                 string model = Text(Get(payload, "model"));
                 if (model.Length > 0) state.Model = model;
@@ -392,15 +400,33 @@ namespace CodexUsageDesktop {
         }
 
         public static Dictionary<string, object> ScanLocal(string projectsDir, string cachePath, DateTime today) {
-            return ScanFiles(projectsDir, cachePath, today, false);
+            return ScanFiles(new[] { projectsDir }, cachePath, today, false, null);
         }
 
         // Codex rollout logs live under <CODEX_HOME>/sessions/YYYY/MM/DD/rollout-*.jsonl.
         public static Dictionary<string, object> ScanCodex(string sessionsDir, string cachePath, DateTime today) {
-            return ScanFiles(sessionsDir, cachePath, today, true);
+            return ScanFiles(new[] { sessionsDir }, cachePath, today, true, null);
         }
 
-        static Dictionary<string, object> ScanFiles(string projectsDir, string cachePath, DateTime today, bool codex) {
+        // Scans the account's own sessions plus the shared Codex app sessions. A session
+        // counts for this account when its creator_account_id matches; sessions without
+        // an account id count when they are in the account's own folder, or in the shared
+        // folder while that folder is logged in to this account.
+        public static Dictionary<string, object> ScanCodexAccount(string ownSessions, string sharedSessions, string accountId, string sharedAccountId, string cachePath, DateTime today) {
+            var dirs = new List<string> { ownSessions };
+            if (!string.IsNullOrEmpty(sharedSessions) && !string.Equals(Path.GetFullPath(sharedSessions).TrimEnd('\\', '/'), Path.GetFullPath(ownSessions).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)) dirs.Add(sharedSessions);
+            string ownPrefix = Path.GetFullPath(ownSessions).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+            accountId = accountId ?? ""; sharedAccountId = sharedAccountId ?? "";
+            Func<string, string, bool> include = delegate(string file, string account) {
+                if (account.Length > 0) return accountId.Length > 0 && string.Equals(account, accountId, StringComparison.OrdinalIgnoreCase);
+                if (Path.GetFullPath(file).StartsWith(ownPrefix, StringComparison.OrdinalIgnoreCase)) return true;
+                return accountId.Length > 0 && string.Equals(sharedAccountId, accountId, StringComparison.OrdinalIgnoreCase);
+            };
+            return ScanFiles(dirs.ToArray(), cachePath, today, true, include);
+        }
+
+        static Dictionary<string, object> ScanFiles(string[] dirs, string cachePath, DateTime today, bool codex, Func<string, string, bool> include) {
+            string projectsDir = string.Join("|", dirs);
             string todayKey = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             string cutoffDay = today.AddDays(-(LocalDays - 1)).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             DateTime cutoffWrite = today.AddDays(-(LocalDays + 1)).ToUniversalTime();
@@ -408,16 +434,17 @@ namespace CodexUsageDesktop {
             if (!string.IsNullOrEmpty(cachePath) && File.Exists(cachePath)) {
                 try {
                     object cache = Json().DeserializeObject(File.ReadAllText(cachePath, Encoding.UTF8));
-                    if (Text(Get(cache, "projects")) == projectsDir && Number(Get(cache, "version")) == 1 && Text(Get(cache, "kind")) == (codex ? "codex" : "claude"))
+                    if (Text(Get(cache, "projects")) == projectsDir && Number(Get(cache, "version")) == 2 && Text(Get(cache, "kind")) == (codex ? "codex" : "claude"))
                         foreach (var pair in Map(Get(cache, "files"))) cachedFiles[pair.Key] = pair.Value;
                 } catch (Exception) { cachedFiles.Clear(); }
             }
             var nextFiles = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             var all = new List<Entry>();
             int scanned = 0;
-            if (Directory.Exists(projectsDir)) {
+            foreach (string dir in dirs) {
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) continue;
                 IEnumerable<string> files;
-                try { files = Directory.EnumerateFiles(projectsDir, "*.jsonl", SearchOption.AllDirectories).ToList(); }
+                try { files = Directory.EnumerateFiles(dir, "*.jsonl", SearchOption.AllDirectories).ToList(); }
                 catch (IOException) { files = new string[0]; } catch (UnauthorizedAccessException) { files = new string[0]; }
                 foreach (string file in files) {
                     try {
@@ -432,6 +459,7 @@ namespace CodexUsageDesktop {
                         if (previous != null && Count(Get(previous, "length")) <= info.Length) {
                             offset = Count(Get(previous, "offset"));
                             state.Model = Text(Get(previous, "model"));
+                            state.Account = Text(Get(previous, "account"));
                             double? lastTotal = Number(Get(previous, "lastTotal"));
                             state.LastTotal = lastTotal.HasValue ? (long)lastTotal.Value : -1;
                             var old = Get(previous, "entries") as IEnumerable;
@@ -439,16 +467,16 @@ namespace CodexUsageDesktop {
                         }
                         if (previous == null || Count(Get(previous, "length")) != info.Length || Text(Get(previous, "mtime")) != info.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture))
                             offset = ReadAppended(file, offset, cutoffDay, entries, state, codex);
-                        all.AddRange(entries);
+                        if (include == null || include(file, state.Account)) all.AddRange(entries);
                         nextFiles[file] = new Dictionary<string, object> {
-                            { "length", info.Length }, { "mtime", info.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture) }, { "offset", offset }, { "model", state.Model }, { "lastTotal", state.LastTotal },
+                            { "length", info.Length }, { "mtime", info.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture) }, { "offset", offset }, { "model", state.Model }, { "account", state.Account }, { "lastTotal", state.LastTotal },
                             { "entries", entries.Select(e => (object)Pack(e)).ToArray() }
                         };
                     } catch (IOException) { } catch (UnauthorizedAccessException) { }
                 }
             }
             if (!string.IsNullOrEmpty(cachePath)) {
-                try { AtomicWrite(cachePath, Json().Serialize(new Dictionary<string, object> { { "version", 1 }, { "kind", codex ? "codex" : "claude" }, { "projects", projectsDir }, { "files", nextFiles } })); }
+                try { AtomicWrite(cachePath, Json().Serialize(new Dictionary<string, object> { { "version", 2 }, { "kind", codex ? "codex" : "claude" }, { "projects", projectsDir }, { "files", nextFiles } })); }
                 catch (Exception) { }
             }
             var seen = new HashSet<string>(StringComparer.Ordinal);

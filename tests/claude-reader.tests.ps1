@@ -135,6 +135,33 @@ try {
   $codex = $reader::ScanCodex((Join-Path $temp 'codex-home\sessions'),$codexCache,$today)
   Assert-Claude ($codex['today']['messages'] -eq 3 -and $codex['topModelToday'] -eq 'GPT-5.4') 'Codex: incremental reads keep the model and duplicate state from the cache.'
 
+  # ---- Codex desktop app: shared ~/.codex/sessions, split by creator_account_id
+  $sharedDay = Join-Path $temp 'shared-codex\sessions\2026\11\16'
+  New-Item -ItemType Directory -Force -Path $sharedDay | Out-Null
+  [System.IO.File]::WriteAllText((Join-Path $sharedDay 'rollout-work.jsonl'),((@(
+    '{"type":"session_meta","payload":{"id":"w1","creator_account_id":"acct-work"}}',
+    '{"type":"turn_context","payload":{"model":"gpt-5.5"}}',
+    (CodexToken $todayNoon.AddMinutes(5) 100 70 0 30)
+  ) -join "`n") + "`n"),$utf8)
+  [System.IO.File]::WriteAllText((Join-Path $sharedDay 'rollout-personal.jsonl'),((@(
+    '{"type":"session_meta","payload":{"id":"p1","creator_account_id":"acct-personal"}}',
+    (CodexToken $todayNoon.AddMinutes(6) 10 6 0 4)
+  ) -join "`n") + "`n"),$utf8)
+  [System.IO.File]::WriteAllText((Join-Path $sharedDay 'rollout-old.jsonl'),((@(
+    '{"type":"session_meta","payload":{"id":"o1"}}',
+    (CodexToken $todayNoon.AddMinutes(7) 1000 900 0 100)
+  ) -join "`n") + "`n"),$utf8)
+  $sharedSessions = Join-Path $temp 'shared-codex\sessions'
+  $missingOwn = Join-Path $temp 'codex-work-home\sessions'
+  $work = $reader::ScanCodexAccount($missingOwn,$sharedSessions,'acct-work','acct-work',(Join-Path $data 'codex-local-work.json'),$today)
+  Assert-Claude ($work['today']['messages'] -eq 2 -and $work['today']['totalTokens'] -eq 1100) 'Codex shared: own-account sessions plus unlabeled sessions of the logged-in account.'
+  $personal = $reader::ScanCodexAccount((Join-Path $temp 'codex-home\sessions'),$sharedSessions,'acct-personal','acct-work',(Join-Path $data 'codex-local-personal2.json'),$today)
+  Assert-Claude ($personal['today']['messages'] -eq 4 -and $personal['today']['totalTokens'] -eq (1000 + 500 + 2000 + 200 + 100 + 10)) 'Codex shared: own folder keeps unlabeled sessions; shared folder adds only this account.'
+  $work = $reader::ScanCodexAccount($missingOwn,$sharedSessions,'acct-work','acct-work',(Join-Path $data 'codex-local-work.json'),$today)
+  Assert-Claude ($work['today']['messages'] -eq 2) 'Codex shared: cached account ids survive incremental reads.'
+  $unknown = $reader::ScanCodexAccount($missingOwn,$sharedSessions,'','acct-work',$null,$today)
+  Assert-Claude ($unknown['today']['messages'] -eq 0) 'Codex shared: an account without an id claims no shared sessions.'
+
   # ---- profile: quota + cache + failures
   $profile = New-Object 'System.Collections.Generic.Dictionary[string,object]'
   $profile['id'] = 'claude'; $profile['label'] = 'Claude'; $profile['claudeHome'] = $home1
