@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Diagnostics;
 using System.Text;
@@ -164,6 +164,21 @@ namespace CodexUsageDesktop {
                     Environment.SetEnvironmentVariable("CODEX_USAGE_DATA_DIR", previousData);
                     Environment.SetEnvironmentVariable("CODEX_USAGE_READ_ID", previousRead);
                 }
+                var releases = new[] {
+                    new ReleaseInfo { tag_name = "v2.0.0" }, new ReleaseInfo { tag_name = "v2.2.0", prerelease = true },
+                    new ReleaseInfo { tag_name = "v9.0.0", draft = true }, new ReleaseInfo { tag_name = "v2.1.0" }, new ReleaseInfo { tag_name = "nightly" }
+                };
+                Check(UpdateAgent.SelectRelease(releases, false).tag_name == "v2.1.0", "Stable channel ignores prereleases and drafts");
+                Check(UpdateAgent.SelectRelease(releases, true).tag_name == "v2.2.0", "Beta channel takes the newest prerelease");
+                Check(UpdateAgent.SelectRelease(new[] { new ReleaseInfo { tag_name = "v2.2.0", prerelease = true } }, false) == null, "A prerelease alone is not offered to stable clients");
+                Check(UpdateAgent.SelectRelease(new[] { new ReleaseInfo { tag_name = "v2.3.0" }, new ReleaseInfo { tag_name = "v2.2.0", prerelease = true } }, true).tag_name == "v2.3.0", "Beta clients also receive newer stable releases");
+                string channelDir = Path.Combine(root, "channel");
+                Directory.CreateDirectory(channelDir);
+                Check(!UpdateAgent.BetaChannel(channelDir), "Missing settings mean the stable channel");
+                File.WriteAllText(Path.Combine(channelDir, "ui-settings.json"), "{\"updateChannel\":\"beta\"}");
+                Check(UpdateAgent.BetaChannel(channelDir), "The updater reads the beta channel from UI settings");
+                File.WriteAllText(Path.Combine(channelDir, "ui-settings.json"), "not json");
+                Check(!UpdateAgent.BetaChannel(channelDir), "Unreadable settings fall back to stable");
                 Check(UpdateAgent.FailureMessage(new System.Net.WebException()).Contains("网络"), "Network update error is actionable");
                 Check(UpdateAgent.FailureMessage(new InvalidDataException()).Contains("校验"), "Verification failure distinguished from network");
                 Check(UpdateAgent.FailureMessage(new UnauthorizedAccessException()).Contains("权限"), "Write permission failure distinguished");

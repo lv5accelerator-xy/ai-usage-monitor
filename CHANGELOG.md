@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0 - 2026-11-16
+
+- Beta update channel: right-click **客户端更新 → 接收测试版（先于朋友更新）**. New versions are published as GitHub prereleases and reach only beta clients; the **Promote release to stable** workflow turns a tested prerelease into the latest release for everyone (same binary, no rebuild). Stable clients keep using `releases/latest`, which never returns prereleases.
+- The updater re-reads the channel before every check; switching channels triggers an immediate check. Switching back to stable never downgrades.
+- New reminders under right-click **通知** (both on by default, independent of the low-quota switch): **额度恢复提醒** when a 5-hour or weekly quota that was used up replenishes, and **读取异常提醒** when an account (or the whole reader) has failed for 15 minutes, with a recovery hint such as re-running Claude Code after an expired login; a follow-up notice confirms reconnection.
+- The low-quota menu is renamed **通知 → 低额度提醒**.
+
 ## 2.0.0 - 2026-11-16
 
 - The UI is now native C#: floating monitor (compact / expanded / rings), detail panel, tray menu, account setup and remote-notification dialogs, refresh lifecycle, low-quota and forecast notifications, full-screen hiding, DPI and display recovery. `tray.ps1`, `ui-experience.ps1`, `remote-ui.ps1`, `ui-model.ps1`, `ui-behavior.ps1` and `launcher.ps1` are retired.

@@ -1,0 +1,39 @@
+name: Promote release to stable
+# New releases are published as prereleases (beta channel only). Running this workflow
+# turns a tested prerelease into the latest stable release, which every client then
+# downloads automatically. The binary is not rebuilt: beta and stable get identical bytes.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to promote, e.g. v2.1.0 (empty = newest prerelease)"
+        required: false
+        default: ""
+permissions:
+  contents: write
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$TAG"
+          if [[ -z "$tag" ]]; then
+            tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 --json tagName,isPrerelease,isDraft,createdAt \
+              --jq '[.[] | select(.isPrerelease and (.isDraft | not))] | sort_by(.createdAt) | last | .tagName // ""')
+          fi
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "No valid prerelease tag to promote: '$tag'"; exit 1; }
+          state=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,assets --jq '[.isDraft, .isPrerelease, ([.assets[].name] | sort | join(","))] | @tsv')
+          IFS=$'\t' read -r draft prerelease assets <<< "$state"
+          [[ "$draft" == "false" ]] || { echo "$tag is still a draft."; exit 1; }
+          for name in CodexUsage.exe update.json SHA256SUMS.txt; do
+            [[ ",$assets," == *",$name,"* ]] || { echo "$tag is missing $name."; exit 1; }
+          done
+          if [[ "$prerelease" == "false" ]]; then echo "$tag is already stable."; fi
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
+          echo "Promoted $tag to the stable channel."

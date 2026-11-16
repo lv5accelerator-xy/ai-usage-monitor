@@ -284,6 +284,29 @@ namespace CodexUsageDesktop {
             app.ThresholdItems[1].PerformClick();
             Check(string.Join(",", app.Settings.NotificationThresholds) == "10" && app.ThresholdItems.Count(i => i.Checked) == 1, "Threshold presets update settings with one selection.");
             app.ItemNotifications.PerformClick();
+            Check(app.ItemRecovery.Checked && app.ItemFailure.Checked && app.Settings.RecoveryNotifications && app.Settings.FailureNotifications, "Recovery and read-failure reminders are on by default.");
+            app.ItemRecovery.PerformClick();
+            Check(!app.Settings.RecoveryNotifications, "Recovery reminders can be turned off.");
+            app.ItemRecovery.PerformClick();
+            Check(!app.ItemBeta.Checked && app.Settings.UpdateChannel == "stable", "Clients start on the stable update channel.");
+            app.ItemBeta.PerformClick();
+            Check(app.Settings.UpdateChannel == "beta", "The beta toggle switches the update channel.");
+            app.ItemBeta.PerformClick();
+            Check(app.Settings.UpdateChannel == "stable", "The beta toggle switches back to stable.");
+            // Recovery from 0% and a 15-minute reader outage produce one notification each.
+            app.SmokeBalloons.Clear();
+            string before = DateTimeOffset.Now.AddMinutes(-2).ToString("o"), after = DateTimeOffset.Now.AddMinutes(-1).ToString("o");
+            app.ProcessHealthNotifications(D("profiles", new object[] { D("id", "work", "ok", true, "fetchedAt", before, "fiveHour", D("remainingPercent", 0)) }));
+            app.ProcessHealthNotifications(D("profiles", new object[] { D("id", "work", "ok", true, "fetchedAt", after, "fiveHour", D("remainingPercent", 64)) }));
+            Check(app.SmokeBalloons.Count == 1 && app.SmokeBalloons[0].StartsWith("额度已恢复|工作") && app.SmokeBalloons[0].Contains("64%"), "Quota recovery after exhaustion notifies with the account name.");
+            app.RefreshError = "Fixture: reader crashed";
+            app.refreshErrorSince = DateTimeOffset.Now.AddMinutes(-16);
+            app.TrackRefreshError(DateTimeOffset.Now);
+            app.TrackRefreshError(DateTimeOffset.Now);
+            Check(app.SmokeBalloons.Count == 2 && app.SmokeBalloons[1].StartsWith("额度读取异常|"), "A 15-minute reader outage notifies once.");
+            app.RefreshError = "";
+            app.TrackRefreshError(DateTimeOffset.Now);
+            Check(!app.refreshErrorSince.HasValue && !app.refreshErrorNotified, "A successful refresh rearms the outage reminder.");
             app.Popup.Show();
             app.SetMonitorExpanded(true);
         }

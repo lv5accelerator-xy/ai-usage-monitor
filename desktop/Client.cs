@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -293,19 +293,49 @@ namespace CodexUsageDesktop {
         public PendingUpdate Pending { get { lock (gate) return pending; } }
         public UpdateAgent(string directory) { data = directory; Status("idle", "启动后自动检查更新", Client.CurrentVersion); }
         void Status(string state, string message, string version) { Client.AtomicJson(Path.Combine(data, "client-status.json"), new { state, message, version, checkedAt = DateTime.UtcNow.ToString("o") }); }
+        // The UI stores the channel in ui-settings.json; the updater re-reads it before every check.
+        public static bool BetaChannel(string dataDir) {
+            try {
+                object settings = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(Path.Combine(dataDir, "ui-settings.json"), Encoding.UTF8));
+                var map = settings as Dictionary<string, object>;
+                object channel;
+                return map != null && map.TryGetValue("updateChannel", out channel) && Convert.ToString(channel) == "beta";
+            } catch (Exception) { return false; }
+        }
+
+        // Stable: the newest published release (GitHub's "latest" never returns prereleases).
+        // Beta: the highest version among published releases, prereleases included.
+        public static ReleaseInfo SelectRelease(IEnumerable<ReleaseInfo> releases, bool beta) {
+            ReleaseInfo best = null;
+            Version bestVersion = null;
+            foreach (ReleaseInfo release in releases ?? new ReleaseInfo[0]) {
+                if (release == null || release.draft || (release.prerelease && !beta)) continue;
+                Version version;
+                try { version = Client.ParseVersion(release.tag_name); } catch (InvalidDataException) { continue; }
+                if (bestVersion == null || version > bestVersion) { best = release; bestVersion = version; }
+            }
+            return best;
+        }
+
         public void Check() {
             try {
                 if (Pending != null) return;
-                Status("checking", "正在检查客户端更新…", Client.CurrentVersion);
+                bool beta = BetaChannel(data);
+                string channel = beta ? "测试版" : "";
+                Status("checking", "正在检查" + channel + "客户端更新…", Client.CurrentVersion);
                 var json = new JavaScriptSerializer();
-                var release = json.Deserialize<ReleaseInfo>(Encoding.UTF8.GetString(Download("https://api.github.com/repos/" + Client.Repository + "/releases/latest", 1024 * 1024)));
-                if (release.draft || release.prerelease || Client.ParseVersion(release.tag_name) <= Client.ParseVersion(Client.CurrentVersion)) { Status("current", "已是最新版本", Client.CurrentVersion); return; }
+                string api = "https://api.github.com/repos/" + Client.Repository + "/releases";
+                ReleaseInfo release = beta
+                    ? SelectRelease(json.Deserialize<List<ReleaseInfo>>(Encoding.UTF8.GetString(Download(api + "?per_page=20", 2 * 1024 * 1024))), true)
+                    : SelectRelease(new[] { json.Deserialize<ReleaseInfo>(Encoding.UTF8.GetString(Download(api + "/latest", 1024 * 1024))) }, false);
+                if (release == null || Client.ParseVersion(release.tag_name) <= Client.ParseVersion(Client.CurrentVersion)) { Status("current", beta ? "已是最新版本（测试版通道）" : "已是最新版本", Client.CurrentVersion); return; }
                 foreach (string name in new[] { "update.json", Client.ExeName }) {
                     if (release.assets == null || !release.assets.Any(a => a.name == name && a.browser_download_url == Client.AssetUrl(release.tag_name, name))) throw new InvalidDataException("Release assets are incomplete.");
                 }
                 var manifest = json.Deserialize<UpdateManifest>(Encoding.UTF8.GetString(Download(Client.AssetUrl(release.tag_name, "update.json"), 65536)));
                 Client.ValidateManifest(manifest, release.tag_name);
-                Status("downloading", "正在后台下载 v" + manifest.version, manifest.version);
+                string kind = release.prerelease ? "测试版 v" : "v";
+                Status("downloading", "正在后台下载 " + kind + manifest.version, manifest.version);
                 string folder = Path.Combine(Path.GetDirectoryName(data), "updates");
                 Directory.CreateDirectory(folder);
                 string candidate = Path.Combine(folder, "CodexUsage-" + manifest.version + ".exe");
@@ -313,7 +343,7 @@ namespace CodexUsageDesktop {
                 int lastPercent = -1;
                 File.WriteAllBytes(temporary, Download(Client.AssetUrl(release.tag_name, Client.ExeName), 30 * 1024 * 1024, delegate(long received, long total) {
                     int percent = (int)Math.Min(100, received * 100 / Math.Max(1, manifest.size));
-                    if (percent != lastPercent) { lastPercent = percent; Status("downloading", "正在下载 v" + manifest.version + " · " + percent + "%", manifest.version); }
+                    if (percent != lastPercent) { lastPercent = percent; Status("downloading", "正在下载 " + kind + manifest.version + " · " + percent + "%", manifest.version); }
                 }));
                 Client.VerifyFile(temporary, manifest.sha256, manifest.size);
                 Version assemblyVersion = AssemblyName.GetAssemblyName(temporary).Version;
@@ -321,7 +351,7 @@ namespace CodexUsageDesktop {
                 if (File.Exists(candidate)) File.Delete(candidate);
                 File.Move(temporary, candidate);
                 lock (gate) pending = new PendingUpdate { Path = candidate, Manifest = manifest };
-                Status("ready", "新版 v" + manifest.version + " 已下载，重启即可更新", manifest.version);
+                Status("ready", (release.prerelease ? "测试版 v" : "新版 v") + manifest.version + " 已下载，重启即可更新", manifest.version);
             } catch (Exception ex) {
                 Client.Log("Update check: " + ex.Message);
                 Status("error", FailureMessage(ex) + " · 点击立即检查更新重试", Client.CurrentVersion);

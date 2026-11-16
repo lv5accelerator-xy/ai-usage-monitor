@@ -356,6 +356,7 @@ namespace CodexUsageDesktop {
 
         public void RenderError(string message) {
             RefreshError = message ?? "";
+            TrackRefreshError(DateTimeOffset.Now);
             if (LastData == null) RenderData(PlaceholderData(false, message));
             UpdateStatus(false);
         }
@@ -432,7 +433,9 @@ namespace CodexUsageDesktop {
             LastData = Model.Merge(LastData, data);
             RefreshError = "";
             UpdateUsageHistory(data);
-            if (final) { ProcessQuotaNotifications(data); ProcessForecastNotifications(data); }
+            if (final) { ProcessQuotaNotifications(data); ProcessForecastNotifications(data); ProcessHealthNotifications(data); }
+            refreshErrorSince = null;
+            refreshErrorNotified = false;
             try { RemoteWorker.WritePending(LastData, RemoteSettings, Remote == null ? Path.Combine(DataDir, "mobile-usage-pending.json") : Remote.MobilePendingPath); }
             catch (Exception ex) { Log("Mobile snapshot queue warning: " + ex.Message); }
             RenderData(LastData);
@@ -454,7 +457,8 @@ namespace CodexUsageDesktop {
 
         // ---------------------------------------------------------------- notifications
         void Balloon(string title, string text, ToolTipIcon icon) {
-            if (Smoke || NotifyIcon == null) return;
+            if (Smoke) { SmokeBalloons.Add(title + "|" + text); return; }
+            if (NotifyIcon == null) return;
             NotifyIcon.ShowBalloonTip(8000, title, text, icon);
         }
 
@@ -467,6 +471,29 @@ namespace CodexUsageDesktop {
                 J.AtomicWrite(AlertStatePath, Behavior.AlertStateToJson(AlertState), false);
                 if (alerts.Count > 0) Balloon("低额度提醒", string.Join("\r\n", alerts.Select(a => a.Label + " · " + a.Title + "剩余 " + Model.Percent(a.Remaining))), ToolTipIcon.Warning);
             } catch (Exception ex) { Log("Notification warning: " + ex.Message); }
+        }
+
+        public Dictionary<string, HealthEntry> HealthState = new Dictionary<string, HealthEntry>();
+        public DateTimeOffset? refreshErrorSince;
+        public bool refreshErrorNotified;
+        public readonly List<string> SmokeBalloons = new List<string>();
+
+        // Recovery from 0% and accounts that keep failing; independent of the low-quota switch.
+        public void ProcessHealthNotifications(object data) {
+            try {
+                var alerts = AccountHealth.Track(data, HealthState, AccountName, Settings.RecoveryNotifications, Settings.FailureNotifications, DateTimeOffset.Now);
+                foreach (HealthAlert alert in alerts) Balloon(alert.Title, alert.Text, alert.Kind == "failure" ? ToolTipIcon.Warning : ToolTipIcon.Info);
+            } catch (Exception ex) { Log("Health notification warning: " + ex.Message); }
+        }
+
+        // The whole reader failing (e.g. crash or timeout) for 15 minutes is reported once.
+        public void TrackRefreshError(DateTimeOffset now) {
+            if (string.IsNullOrEmpty(RefreshError)) { refreshErrorSince = null; refreshErrorNotified = false; return; }
+            if (!refreshErrorSince.HasValue) refreshErrorSince = now;
+            if (Settings.FailureNotifications && !refreshErrorNotified && (now - refreshErrorSince.Value).TotalMinutes >= AccountHealth.FailureMinutes) {
+                refreshErrorNotified = true;
+                Balloon("额度读取异常", "已连续 " + AccountHealth.FailureMinutes + " 分钟无法刷新额度：" + RefreshError, ToolTipIcon.Warning);
+            }
         }
 
         // Early warning: 5h quota about to run out within 30 minutes, weekly within 24 hours.

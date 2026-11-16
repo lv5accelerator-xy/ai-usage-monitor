@@ -294,8 +294,8 @@ namespace CodexUsageDesktop {
             opacityMenu.DropDownItems.Add(new ToolStripControlHost(opacityPanel) { AutoSize = false, Size = opacityPanel.Size });
             opacityMenu.DropDownOpening += delegate { if (Settings.CompactMode) SetMonitorExpanded(false); };
             ItemSnap = Check(items, "贴边吸附", Settings.EdgeSnap, delegate { Settings.EdgeSnap = ItemSnap.Checked; SnapMonitor(); SaveSettings(); });
-            var notifications = Item(items, "低额度通知", null);
-            ItemNotifications = Check(notifications.DropDownItems, "启用通知", Settings.NotificationsEnabled, delegate {
+            var notifications = Item(items, "通知", null);
+            ItemNotifications = Check(notifications.DropDownItems, "低额度提醒", Settings.NotificationsEnabled, delegate {
                 Settings.NotificationsEnabled = ItemNotifications.Checked;
                 AlertBaselinePending = true;
                 foreach (AlertEntry entry in AlertState.Values) entry.Value = null;
@@ -316,6 +316,9 @@ namespace CodexUsageDesktop {
                 item.Checked = string.Join(",", Settings.NotificationThresholds) == string.Join(",", preset);
                 ThresholdItems.Add(item);
             }
+            notifications.DropDownItems.Add(new ToolStripSeparator());
+            ItemRecovery = Check(notifications.DropDownItems, "额度恢复提醒（用完后恢复时）", Settings.RecoveryNotifications, delegate { Settings.RecoveryNotifications = ItemRecovery.Checked; SaveSettings(); });
+            ItemFailure = Check(notifications.DropDownItems, "读取异常提醒（连续 15 分钟失败）", Settings.FailureNotifications, delegate { Settings.FailureNotifications = ItemFailure.Checked; SaveSettings(); });
             items.Add(new ToolStripSeparator());
             Item(items, "展开 / 收起额度面板", delegate { TogglePopup(); });
             Item(items, "立即刷新", delegate { StartRefresh(); });
@@ -357,6 +360,14 @@ namespace CodexUsageDesktop {
                 Exit();
             });
             RestartUpdateItem.Visible = false;
+            ItemBeta = Check(client.DropDownItems, "接收测试版（先于朋友更新）", Settings.UpdateChannel == "beta", delegate {
+                Settings.UpdateChannel = ItemBeta.Checked ? "beta" : "stable";
+                SaveSettings();
+                if (!Smoke && version.Length > 0) {
+                    File.WriteAllText(Path.Combine(DataDir, "check-update.request"), "check");
+                    ClientStatusItem.Text = ItemBeta.Checked ? "已切换到测试版通道，正在检查…" : "已切换到正式版通道，正在检查…";
+                }
+            });
             Item(client.DropDownItems, "版本说明 / 下载客户端", delegate { OpenUrl("https://github.com/" + Client.Repository + "/releases/latest"); });
             Item(items, "使用指南 / 分享给朋友", delegate { OpenUrl("https://github.com/" + Client.Repository + "/blob/main/docs/FRIENDS.md"); });
             items.Add(new ToolStripSeparator());
