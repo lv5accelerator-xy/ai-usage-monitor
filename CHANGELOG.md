@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.2 - 2026-11-16
+
+- When there is no local session in the last seven days, the local-usage line no longer shows "0 tokens · $0.00" with an empty chart. The Claude card explains that cloud sessions (Claude app / web) are not written to local logs and that the 5-hour / weekly quota is the real usage figure; Codex cards say there is no local session. Applies to the desktop card, tooltips and the iPhone PWA.
+
 ## 2.0.1 - 2026-11-16
 
 - Local Codex usage now includes sessions from the Codex desktop app, which keeps every account's sessions in `~/.codex/sessions`. Previously only the per-account homes (`~/.codex-personal`, `~/.codex-work`) were scanned and the figure stayed at 0. Each session is assigned to its account by `creator_account_id`; only the account id is read from `auth.json`.

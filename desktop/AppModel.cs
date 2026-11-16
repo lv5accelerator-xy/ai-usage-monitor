@@ -252,6 +252,15 @@ namespace CodexUsageDesktop {
             return "$" + n.Value.ToString("0.00", J.Inv);
         }
 
+        // No local session in the seven-day window. Claude sessions run in the Claude
+        // app or on the web never reach ~/.claude/projects, so "0 tokens" would mislead.
+        public static bool LocalUsageEmpty(object usage) {
+            return usage == null || J.Get(usage, "today") == null || (J.Num(J.Get(usage, "week", "totalTokens")) ?? 0) <= 0;
+        }
+        public static string LocalUsageSummary(object usage, string provider) {
+            if (LocalUsageEmpty(usage)) return provider == "claude" ? "无本机记录 · 云端会话不计入，以额度为准" : "近 7 天无本机会话记录";
+            return LocalUsageSummary(usage);
+        }
         public static string LocalUsageSummary(object usage) {
             if (usage == null || J.Get(usage, "today") == null) return "本机用量：暂无记录";
             return "今日 " + Tokens(J.Get(usage, "today", "totalTokens")) + " tokens · ≈" + Usd(J.Get(usage, "today", "costUsd")) +
@@ -260,7 +269,7 @@ namespace CodexUsageDesktop {
 
         public static string LocalUsageDetail(object usage, string provider) {
             string tool = provider == "codex" ? "Codex" : "Claude Code";
-            if (usage == null || J.Get(usage, "today") == null) return "尚未在本机找到最近 7 天的 " + tool + " 会话记录。";
+            if (LocalUsageEmpty(usage)) return "尚未在本机找到最近 7 天的 " + tool + " 会话记录。" + (provider == "claude" ? "\r\n在 Claude 应用或网页中运行的云端会话不会写入本机日志，实际用量以上方 5 小时 / 每周额度为准。" : "");
             object t = J.Get(usage, "today");
             var lines = new List<string> {
                 "今日：输入 " + Tokens(J.Get(t, "inputTokens")) + " · 输出 " + Tokens(J.Get(t, "outputTokens")) + " · 缓存写入 " + Tokens(J.Get(t, "cacheWriteTokens")) + " · 缓存读取 " + Tokens(J.Get(t, "cacheReadTokens")),
