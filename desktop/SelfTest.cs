@@ -240,7 +240,10 @@ namespace CodexUsageDesktop {
                 Check(File.ReadAllText(status).Contains("ready"), "Status file replacement is atomic");
                 using (var ui = Client.StartUi(payload, data, "fixture", true)) {
                     if (!ui.WaitForExit(90000)) { ui.Kill(); throw new Exception("Packaged UI smoke test timed out."); }
-                    Check(ui.ExitCode == 0, "Packaged UI passes native smoke test; see data/logs/smoke-report.txt");
+                    string smoke = Path.Combine(data, "logs", "smoke-report.txt");
+                    string detail = File.Exists(smoke) ? File.ReadAllText(smoke) : "(no smoke report)";
+                    if (detail.Length > 1500) detail = detail.Substring(0, 1500);
+                    Check(ui.ExitCode == 0, "Packaged UI passes native smoke test: " + detail);
                 }
                 File.WriteAllText(report, "PASS: " + checks + " client checks and packaged native UI smoke test." + Environment.NewLine, Encoding.UTF8);
                 return 0;
