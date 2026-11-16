@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -129,7 +129,12 @@ namespace CodexUsageDesktop {
                 double? remaining = Number(Get(rawLimit, "remainingPercent"));
                 individual = new { limit = Get(rawLimit, "limit"), used = Get(rawLimit, "used"), remainingPercent = remaining.HasValue ? (double?)Math.Max(0, Math.Min(100, remaining.Value)) : null, resetsAt = Iso(Get(rawLimit, "resetsAt")) };
             }
-            return new { id = Text(Get(profile, "id")), label = Text(Get(profile, "label")), codexHome = Text(Get(profile, "codexHome")), ok = true, fetchedAt = DateTimeOffset.UtcNow.ToString("o"), planType = Text(Get(snapshot, "planType")), accountId = Get(result, "accountId"), ordinaryUsageAllowed = Get(result, "ordinaryUsageAllowed"), individualLimit = individual, fiveHour = windows.FirstOrDefault(w => Text(Get(w, "kind")) == "5h"), weekly = windows.FirstOrDefault(w => Text(Get(w, "kind")) == "weekly"), windows };
+            return new Dictionary<string, object> {
+                { "id", Text(Get(profile, "id")) }, { "label", Text(Get(profile, "label")) }, { "codexHome", Text(Get(profile, "codexHome")) }, { "ok", true },
+                { "fetchedAt", DateTimeOffset.UtcNow.ToString("o") }, { "planType", Text(Get(snapshot, "planType")) }, { "accountId", Get(result, "accountId") },
+                { "ordinaryUsageAllowed", Get(result, "ordinaryUsageAllowed") }, { "individualLimit", individual },
+                { "fiveHour", windows.FirstOrDefault(w => Text(Get(w, "kind")) == "5h") }, { "weekly", windows.FirstOrDefault(w => Text(Get(w, "kind")) == "weekly") }, { "windows", windows }
+            };
         }
         public static object ReadProfiles(string config, string cli) {
             string data = Path.GetDirectoryName(Path.GetFullPath(config));
@@ -141,7 +146,17 @@ namespace CodexUsageDesktop {
             if (Text(Get(profile, "provider")) == "claude") return ClaudeReader.ReadProfile(profile, data);
             string path = cli();
             if (path == null) throw new FileNotFoundException("未找到 Codex CLI，请打开“账号与首次使用”安装。");
-            return ConvertResult(profile, ReadRpc(ServerInfo(path, Home(Text(Get(profile, "codexHome"))))));
+            var converted = (Dictionary<string, object>)ConvertResult(profile, ReadRpc(ServerInfo(path, Home(Text(Get(profile, "codexHome"))))));
+            converted["localUsage"] = CodexLocal(profile, data);
+            return converted;
+        }
+        // Local Codex session statistics never fail the quota read.
+        public static object CodexLocal(object profile, string data) {
+            try {
+                string home = Home(Text(Get(profile, "codexHome")));
+                string cache = string.IsNullOrWhiteSpace(data) ? null : Path.Combine(data, "codex-local-" + System.Text.RegularExpressions.Regex.Replace(Text(Get(profile, "id")), "[^A-Za-z0-9_-]", "_") + ".json");
+                return ClaudeReader.ScanCodex(Path.Combine(home, "sessions"), cache, DateTime.Now.Date);
+            } catch (Exception) { return null; }
         }
         public static object ReadProfilesWithReader(string config, Func<object, object> readProfile, Action<object, bool> publish) {
             var parsed = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(config, Encoding.UTF8));

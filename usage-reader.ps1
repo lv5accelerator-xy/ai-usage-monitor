@@ -323,7 +323,16 @@ function Get-CodexUsageForProfile {
   $resolvedCodexHome = Resolve-CodexHomePath ([string]$Profile.codexHome)
   try {
     $result = Invoke-CodexRateLimitsRead -CodexPath $CodexPath -CodexHome $resolvedCodexHome
-    return Convert-CodexUsageResult -Profile $Profile -Result $result
+    $converted = Convert-CodexUsageResult -Profile $Profile -Result $result
+    $local = $null
+    try {
+      Import-ClaudeReader
+      $dataRoot = if ([string]::IsNullOrWhiteSpace($env:CODEX_USAGE_DATA_DIR)) { $PSScriptRoot } else { $env:CODEX_USAGE_DATA_DIR }
+      $safeId = ([string]$Profile.id) -replace '[^A-Za-z0-9_-]','_'
+      $local = [CodexUsageDesktop.ClaudeReader]::ScanCodex((Join-Path $resolvedCodexHome 'sessions'),(Join-Path $dataRoot ('codex-local-' + $safeId + '.json')),[DateTime]::Now.Date)
+    } catch { $local = $null }
+    $converted | Add-Member -NotePropertyName localUsage -NotePropertyValue $local -Force
+    return $converted
   } catch {
     return [pscustomobject]@{
       id = [string]$Profile.id
