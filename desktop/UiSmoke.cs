@@ -83,7 +83,7 @@ namespace CodexUsageDesktop {
 
         static void Basics() {
             fixtureTime = DateTimeOffset.Now.ToString("o");
-            resetTime = DateTimeOffset.Now.AddHours(2).ToString("o");
+            resetTime = DateTimeOffset.Now.AddHours(2).AddSeconds(30).ToString("o");
             sample = Sample();
             settingsBefore = Snapshot(Path.Combine(app.DataDir, "ui-settings.json"));
             remoteBefore = Snapshot(app.RemoteSettingsPath);
@@ -388,8 +388,9 @@ namespace CodexUsageDesktop {
                 }
             } finally { app.Ball.ApplyDpi(originalDpi, new Rectangle(app.Ball.Left, app.Ball.Top, 60 * originalDpi / 96, 328 * originalDpi / 96)); }
             var tooltip = (Dictionary<string, object>)Clone(sample);
-            ((Dictionary<string, object>)P(tooltip, 1)["weekly"])["resetsAt"] = DateTimeOffset.Now.AddDays(3).AddHours(1).ToString("o");
-            ((Dictionary<string, object>)P(tooltip, 1)["individualLimit"])["resetsAt"] = DateTimeOffset.Now.AddDays(20).AddHours(1).ToString("o");
+            // Half-hour offsets keep the countdown text stable however close in time both sides compute it.
+            ((Dictionary<string, object>)P(tooltip, 1)["weekly"])["resetsAt"] = DateTimeOffset.Now.AddDays(3).AddHours(1).AddMinutes(30).ToString("o");
+            ((Dictionary<string, object>)P(tooltip, 1)["individualLimit"])["resetsAt"] = DateTimeOffset.Now.AddDays(20).AddHours(1).AddMinutes(30).ToString("o");
             app.UpdateBallSummary(tooltip);
             string weeklyTip = app.ToolTip.GetToolTip(app.RingCells["work-long"]), weeklyExpected = Model.ResetText(J.Get(P(tooltip, 1), "weekly", "resetsAt"));
             Check(weeklyTip.EndsWith(weeklyExpected), "Weekly-limited ring tooltip uses the weekly reset. expected=" + weeklyExpected + " actual=" + weeklyTip.Replace("\r\n", " | "));
