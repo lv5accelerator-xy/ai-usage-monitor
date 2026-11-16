@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1 - 2026-11-16
+
+- Local Codex usage now includes sessions from the Codex desktop app, which keeps every account's sessions in `~/.codex/sessions`. Previously only the per-account homes (`~/.codex-personal`, `~/.codex-work`) were scanned and the figure stayed at 0. Each session is assigned to its account by `creator_account_id`; only the account id is read from `auth.json`.
+
 ## 2.0.0 - 2026-11-16
 
 - The UI is now native C#: floating monitor (compact / expanded / rings), detail panel, tray menu, account setup and remote-notification dialogs, refresh lifecycle, low-quota and forecast notifications, full-screen hiding, DPI and display recovery. `tray.ps1`, `ui-experience.ps1`, `remote-ui.ps1`, `ui-model.ps1`, `ui-behavior.ps1` and `launcher.ps1` are retired.

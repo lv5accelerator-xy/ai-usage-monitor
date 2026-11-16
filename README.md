@@ -2,7 +2,7 @@
 
 Windows desktop quota monitor for two ChatGPT/Codex accounts (Personal + Work) and one Claude account.
 
-Current version: **v2.0.0**
+Current version: **v2.0.1**
 
 ## v2.0.0: native C# client
 
