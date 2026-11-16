@@ -190,9 +190,8 @@ namespace CodexUsageDesktop {
                 Client.InstallCandidate(Client.Self, target, hash, size);
                 Check(Client.Hash(target + ".bak") == hash, "Subsequent replacement rotates backup");
                 string payload = Client.ExtractPayload(root);
-                Check(File.Exists(Path.Combine(payload, "tray.ps1")), "Embedded UI extracted");
-                Check(File.Exists(Path.Combine(payload, "CodexUsage.Controls.dll")), "Precompiled UI controls packaged");
-                Check(!File.Exists(Path.Combine(payload, "ui-controls.cs")), "Packaged UI requires no runtime source compilation");
+                Check(File.Exists(Path.Combine(payload, "login-claude.bat")) && File.Exists(Path.Combine(payload, "setup-account.ps1")), "Login helpers extracted");
+                Check(!File.Exists(Path.Combine(payload, "tray.ps1")) && Directory.GetFiles(payload, "*.cs").Length == 0, "Packaged UI is native; no PowerShell UI or runtime source compilation");
                 string uninstallRoot = Path.Combine(root, "uninstall-fixture");
                 Directory.CreateDirectory(Path.Combine(uninstallRoot, "data"));
                 Directory.CreateDirectory(Path.Combine(uninstallRoot, "app"));
@@ -226,7 +225,7 @@ namespace CodexUsageDesktop {
                 Check(File.ReadAllText(status).Contains("ready"), "Status file replacement is atomic");
                 using (var ui = Client.StartUi(payload, data, "fixture", true)) {
                     if (!ui.WaitForExit(90000)) { ui.Kill(); throw new Exception("Packaged UI smoke test timed out."); }
-                    Check(ui.ExitCode == 0, "Packaged UI passes native smoke test; see data/logs/tray.log");
+                    Check(ui.ExitCode == 0, "Packaged UI passes native smoke test; see data/logs/smoke-report.txt");
                 }
                 File.WriteAllText(report, "PASS: " + checks + " client checks and packaged native UI smoke test." + Environment.NewLine, Encoding.UTF8);
                 return 0;

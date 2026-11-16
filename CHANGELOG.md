@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.0 - 2026-11-16
+
+- The UI is now native C#: floating monitor (compact / expanded / rings), detail panel, tray menu, account setup and remote-notification dialogs, refresh lifecycle, low-quota and forecast notifications, full-screen hiding, DPI and display recovery. `tray.ps1`, `ui-experience.ps1`, `remote-ui.ps1`, `ui-model.ps1`, `ui-behavior.ps1` and `launcher.ps1` are retired.
+- The cross-device completion notification and mobile sync worker runs as a background thread inside the client instead of a hidden PowerShell process. Relay topics, encryption (AES-256-CBC + HMAC-SHA256) and the file protocol are unchanged and verified against the shared cross-runtime vector, so paired PCs on v1.x and the iPhone PWA keep working.
+- The installed client launches its UI as a second instance of `CodexUsage.exe` (`--ui`); update checks, staged installs and rollback after a failed start are unchanged. No PowerShell process is started unless you open a login helper.
+- Existing `profiles.json`, `ui-settings.json`, notification ledger, forecast history and remote settings are read in place; no migration step is required.
+- The payload now contains only login helpers, `profiles.json` and the icon; drawing controls are compiled into the EXE.
+- Tests: model, alert, forecast, snapping, settings, mobile snapshot, crypto and background-worker rules run offline against the C# code, including an end-to-end worker run with a fake relay; the native UI smoke test runs the real EXE (`--ui-smoke`) in CI and in the packaged self-test.
+- Fixes the bottom-docked resting position calculation for three visible accounts.
+- `start.bat` in a source checkout now builds and starts the native EXE.
+
 ## 1.1.0 - 2026-11-16
 
 - Burn-rate forecast for every 5-hour and weekly quota: a least-squares rate over recent fresh readings in the current reset cycle (last hour for 5h, last 12 h for weekly). Cards show "预计 HH:mm 用完" or "按当前速度可用到重置"; the compact strip warns before the 5h or weekly quota runs out; tooltips show the rate in %/hour. Forecasts need about 10 minutes (5h) or 2 hours (weekly) of readings and never mix reset cycles.

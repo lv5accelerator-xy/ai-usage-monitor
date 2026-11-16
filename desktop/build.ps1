@@ -8,9 +8,11 @@ if (Test-Path $build) { Remove-Item -Recurse -Force $build }
 New-Item -ItemType Directory -Force -Path $build,$dist | Out-Null
 $payload = Join-Path $build 'payload'
 New-Item -ItemType Directory -Force -Path $payload | Out-Null
-# Deliberate source allowlist; never package logs, preferences, or local credentials.
-Get-ChildItem $root -File | Where-Object { $_.Extension -in @('.ps1','.bat','.vbs') -or $_.Name -in @('profiles.json','VERSION','ui-controls.cs','claude-reader.cs') } | Copy-Item -Destination $payload
-Copy-Item (Join-Path $root 'tests') (Join-Path $payload 'tests') -Recurse
+# Deliberate allowlist: the payload carries only user-launched login helpers and the icon.
+# The UI, reader, background worker and drawing controls are compiled into the EXE (v2.0+).
+$payloadFiles = @('profiles.json','VERSION','codex-tools.ps1','setup-account.ps1','setup-personal.ps1','setup-work.ps1','setup-claude.ps1',
+  'install-codex-cli.ps1','install-codex-cli.bat','login-personal.bat','login-work.bat','login-claude.bat','first-run-setup.bat','diagnose.ps1','diagnose.bat')
+foreach ($name in $payloadFiles) { Copy-Item (Join-Path $root $name) -Destination $payload }
 New-Item -ItemType Directory -Force -Path (Join-Path $payload 'assets') | Out-Null
 Copy-Item (Join-Path $root 'assets\app.ico') (Join-Path $payload 'assets\app.ico')
 $utf8Bom = New-Object System.Text.UTF8Encoding($true)
@@ -20,21 +22,15 @@ Get-ChildItem $payload -Recurse -Filter '*.ps1' | ForEach-Object {
 }
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
-# Precompile native controls; packaged startup does not invoke a C# compiler.
-& $csc /nologo /target:library /optimize+ /codepage:65001 `
-  "/out:$(Join-Path $payload 'CodexUsage.Controls.dll')" `
-  /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $root 'ui-controls.cs')
-if ($LASTEXITCODE -ne 0) { throw 'UI controls compilation failed.' }
-Remove-Item (Join-Path $payload 'ui-controls.cs')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = Join-Path $build 'payload.zip'
 [System.IO.Compression.ZipFile]::CreateFromDirectory($payload,$zip)
 $assemblyInfo = Join-Path $build 'AssemblyInfo.cs'
 @"
 using System.Reflection;
-[assembly: AssemblyTitle("Codex Dual Usage")]
+[assembly: AssemblyTitle("Codex + Claude Usage")]
 [assembly: AssemblyDescription("Codex and Claude quota monitor")]
-[assembly: AssemblyProduct("Codex Dual Usage")]
+[assembly: AssemblyProduct("Codex + Claude Usage")]
 [assembly: AssemblyVersion("$version.0")]
 [assembly: AssemblyFileVersion("$version.0")]
 "@ | Set-Content -LiteralPath $assemblyInfo -Encoding UTF8
@@ -44,7 +40,7 @@ $exe = Join-Path $dist 'CodexUsage.exe'
   "/resource:$zip,CodexUsage.Payload.zip" `
   /reference:System.dll /reference:System.Core.dll /reference:System.Windows.Forms.dll /reference:System.Drawing.dll `
   /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll /reference:System.Web.Extensions.dll /reference:Microsoft.CSharp.dll `
-  (Join-Path $PSScriptRoot 'UsageReader.cs') (Join-Path $root 'claude-reader.cs') (Join-Path $PSScriptRoot 'Client.cs') (Join-Path $PSScriptRoot 'Distribution.cs') (Join-Path $PSScriptRoot 'SelfTest.cs') $assemblyInfo
+  (Get-ChildItem $PSScriptRoot -Filter '*.cs' | ForEach-Object { $_.FullName }) (Join-Path $root 'claude-reader.cs') (Join-Path $root 'ui-controls.cs') $assemblyInfo
 if ($LASTEXITCODE -ne 0) { throw 'Desktop client compilation failed.' }
 $manifest = [ordered]@{
   version = $version
