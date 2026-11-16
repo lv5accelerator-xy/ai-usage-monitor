@@ -426,7 +426,11 @@ for ($m = 20; $m -ge 0; $m--) {
 }
 Update-Status
 $workFive = @($script:ResetLabels | Where-Object { $_.Tag.kind -eq 'fiveHour' -and [string]$_.Tag.profile.id -eq 'work' })
-Assert-Ui ($workFive.Count -eq 1 -and $workFive[0].Text -match '用完' -and $workFive[0].ForeColor -eq $script:Theme.Warning) 'Card reset line shows the exhaustion forecast.'
+$workProfile = $workFive[0].Tag.profile
+$workForecast = Get-ProfileForecast $workProfile 'fiveHour'
+Assert-Ui ($workFive.Count -eq 1) ('One work 5h reset label exists: ' + $workFive.Count)
+Assert-Ui ($workFive[0].Text -match '用完') ('Card reset line shows the exhaustion forecast: "' + $workFive[0].Text + '" state=' + [string]$workForecast.state + ' remaining=' + [string]$workProfile.fiveHour.remainingPercent + ' reset=' + [string]$workProfile.fiveHour.resetsAt + ' ok=' + [string]$workProfile.ok + ' samples=' + [string]$script:UsageHistory['work|fiveHour'].Count)
+Assert-Ui ($workFive[0].ForeColor.ToArgb() -eq $script:Theme.Warning.ToArgb()) 'Forecast reset line is amber.'
 Assert-Ui ($script:ToolTip.GetToolTip($workFive[0]) -match '%/小时') 'Forecast tooltip shows the burn rate.'
 $personalFive = @($script:ResetLabels | Where-Object { $_.Tag.kind -eq 'fiveHour' -and [string]$_.Tag.profile.id -eq 'personal' })
 Assert-Ui ($personalFive[0].Text -notmatch '用完') 'Accounts without history show no forecast.'
