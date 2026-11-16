@@ -521,7 +521,9 @@ try {
     param($Profile)
     $isClaude = Test-ClaudeProfile $Profile
     $hasMonthly = Test-MeaningfulLimit $Profile.individualLimit
-    $extraWindows = if ($isClaude) { @($Profile.windows | Where-Object { $null -ne $_ -and [string]$_.kind -like 'weekly-*' }) } else { @() }
+    # Wrap the whole expression: PowerShell 5.1 unrolls a one-item array returned from `if`,
+    # and a lone PSCustomObject has no .Count there.
+    $extraWindows = @(if ($isClaude) { $Profile.windows | Where-Object { $null -ne $_ -and [string]$_.kind -like 'weekly-*' } })
     $localOnly = $isClaude -and $Profile.ok -and -not [string]::IsNullOrWhiteSpace([string]$Profile.quotaError)
     $card = New-Object CodexUsage.Surface
     $card.Radius = U 12
