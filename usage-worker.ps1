@@ -22,11 +22,11 @@ try {
   . (Join-Path $root 'codex-tools.ps1')
   . (Join-Path $root 'usage-reader.ps1')
 
-  $codexPath = Find-CodexCommand
-  if ([string]::IsNullOrWhiteSpace([string]$codexPath)) {
-    throw '未找到 Codex CLI。请在右键菜单中选择账号登录，完成安装和授权。'
-  }
-  Write-WorkerLog ('Codex path: ' + $codexPath)
+  $codexPath = [string](Find-CodexCommand)
+  if ([string]::IsNullOrWhiteSpace($codexPath)) {
+    $codexPath = ''
+    Write-WorkerLog 'Codex CLI not found; Codex accounts will report an error, Claude can still update.'
+  } else { Write-WorkerLog ('Codex path: ' + $codexPath) }
 
   $dataRoot = if ([string]::IsNullOrWhiteSpace($env:CODEX_USAGE_DATA_DIR)) { $root } else { $env:CODEX_USAGE_DATA_DIR }
   $configPath = Join-Path $dataRoot 'profiles.json'

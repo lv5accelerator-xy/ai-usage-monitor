@@ -1,4 +1,40 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
+
+# Script mode compiles the same C# Claude reader that the packaged EXE embeds.
+function Import-ClaudeReader {
+  param([string]$Root = $PSScriptRoot)
+  if ('CodexUsageDesktop.ClaudeReader' -as [type]) { return }
+  $source = Join-Path $Root 'claude-reader.cs'
+  $webExtensions = $null
+  try { $webExtensions = [System.Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35') } catch {}
+  if ($null -ne $webExtensions) {
+    Add-Type -Path $source -ReferencedAssemblies System.Web.Extensions,System.Core
+  } else {
+    # PowerShell 7 has no System.Web.Extensions; tests use a System.Text.Json shim.
+    Add-Type -Path @($source,(Join-Path $Root 'tests\support\JavaScriptSerializerShim.cs')) -IgnoreWarnings -WarningAction SilentlyContinue
+  }
+}
+
+function Get-ClaudeUsageForProfile {
+  param([Parameter(Mandatory = $true)]$Profile,[string]$DataRoot)
+  try {
+    Import-ClaudeReader
+    # The C# reader expects JavaScriptSerializer-style dictionaries.
+    $map = New-Object 'System.Collections.Generic.Dictionary[string,object]'
+    foreach ($name in @('id','label','claudeHome')) { $map[$name] = [string]$Profile.$name }
+    return [CodexUsageDesktop.ClaudeReader]::ReadProfile($map,$DataRoot)
+  } catch {
+    $message = if ($null -ne $_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
+    return [pscustomobject]@{
+      id = [string]$Profile.id
+      label = [string]$Profile.label
+      provider = 'claude'
+      ok = $false
+      fetchedAt = (Get-Date).ToUniversalTime().ToString('o')
+      error = $message
+    }
+  }
+}
 
 function Resolve-CodexHomePath {
   param([string]$Path)
@@ -303,13 +339,21 @@ function Get-CodexUsageForProfile {
 function Get-CodexUsageAllProfiles {
   param(
     [Parameter(Mandatory = $true)][string]$ConfigPath,
-    [Parameter(Mandatory = $true)][string]$CodexPath
+    [AllowEmptyString()][string]$CodexPath = ''
   )
   $profiles = Read-ProfilesConfig -ConfigPath $ConfigPath
+  $dataRoot = Split-Path -Parent ([System.IO.Path]::GetFullPath($ConfigPath))
   $results = @()
   foreach ($profile in $profiles) {
     if ($profile.PSObject.Properties.Name -contains 'enabled' -and -not $profile.enabled) { continue }
-    $results += Get-CodexUsageForProfile -Profile $profile -CodexPath $CodexPath
+    if ([string]$profile.provider -eq 'claude') {
+      $results += Get-ClaudeUsageForProfile -Profile $profile -DataRoot $dataRoot
+    } elseif ([string]::IsNullOrWhiteSpace($CodexPath)) {
+      # A missing Codex CLI fails Codex accounts only; Claude can still update.
+      $results += [pscustomobject]@{ id = [string]$profile.id; label = [string]$profile.label; ok = $false; fetchedAt = (Get-Date).ToUniversalTime().ToString('o'); error = '未找到 Codex CLI。请在右键菜单中选择账号登录，完成安装和授权。' }
+    } else {
+      $results += Get-CodexUsageForProfile -Profile $profile -CodexPath $CodexPath
+    }
   }
   return [pscustomobject]@{
     ok = $true

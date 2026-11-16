@@ -3,10 +3,17 @@ function Load-ProfilePreferences {
   if ($SmokeTest) {
     $script:ProfileConfig = [pscustomobject]@{ profiles = @(
       [pscustomobject]@{id='personal';label='个人';codexHome='~/.codex-personal';enabled=$true},
-      [pscustomobject]@{id='work';label='工作';codexHome='~/.codex-work';enabled=$true}
+      [pscustomobject]@{id='work';label='工作';codexHome='~/.codex-work';enabled=$true},
+      [pscustomobject]@{id='claude';label='Claude';provider='claude';claudeHome='~/.claude';enabled=$false}
     ) }
   } else {
-    $script:ProfileConfig = Get-Content -LiteralPath (Join-Path $script:DataRoot 'profiles.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $profilePath = Join-Path $script:DataRoot 'profiles.json'
+    $script:ProfileConfig = Get-Content -LiteralPath $profilePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    # v1.0 adds a Claude slot to older configurations before the first read.
+    if (Add-ClaudeProfileIfMissing -Config $script:ProfileConfig) {
+      try { Save-ProfilePreferences -Config $script:ProfileConfig -Path $profilePath; Write-TrayLog 'Added Claude account slot to profiles.json.' }
+      catch { Write-TrayLog ('Claude profile migration warning: ' + $_.Exception.Message) }
+    }
   }
   $script:ProfileRevision = 0
   $script:RecoveryRequests = @{}
@@ -32,7 +39,8 @@ function Save-ProfilePreferences {
   }
 }
 function Get-ActiveIds {
-  return @($script:ProfileConfig.profiles | Where-Object { (Get-ProfileEnabled $_) -and $_.id -in @('personal','work') } | ForEach-Object { [string]$_.id })
+  $known = Get-AllAccountIds
+  return @($script:ProfileConfig.profiles | Where-Object { (Get-ProfileEnabled $_) -and $_.id -in $known } | ForEach-Object { [string]$_.id })
 }
 function Get-AccountName {
   param([string]$Id)
@@ -45,13 +53,10 @@ function Get-AccountName {
       break
     }
   }
-  if ($Id -eq 'personal') { return '个人' }
-  return '工作'
+  return Get-DefaultAccountName $Id
 }
-function Get-ExpandedHeight {
-  if (@(Get-ActiveIds).Count -eq 1) { return 108 }
-  return 142
-}
+function Get-ExpandedHeight { return Get-ExpandedHeightFor @(Get-ActiveIds).Count }
+function Get-BallWidth { return Get-MonitorWidth @(Get-ActiveIds).Count }
 function B {
   param([double]$Value)
   $scale = if ($null -ne $script:Ball) { $script:Ball.DisplayDpi / 96.0 } else { $script:UiScale }
@@ -91,13 +96,15 @@ function Update-MonitorLayoutScale {
     $script:Ball.ApplyZoom([single]($scale / $script:AppliedMonitorScale))
     $script:AppliedMonitorScale = $scale
   }
-  $script:Ball.Radius = B 16
+  $script:Ball.Radius = B 10
+  $script:Ball.HudUnit = [single]((B 100) / 100.0)
 }
 function Apply-ProfileLayout {
   $active = @(Get-ActiveIds)
   $count = [Math]::Max(1,$active.Count)
-  for ($i=0; $i -lt 2; $i++) {
-    $id = @('personal','work')[$i]
+  $ids = Get-AllAccountIds
+  for ($i=0; $i -lt $ids.Count; $i++) {
+    $id = $ids[$i]
     $show = $id -in $active
     $script:CompactGrid.ColumnStyles[$i].Width = if ($show) { 100.0 / $count } else { 0 }
     $script:CompactCells[$id].Visible = $show
@@ -126,8 +133,37 @@ function Find-SetupCli {
   )) { if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate } }
   return $null
 }
+function Find-ClaudeCli {
+  foreach ($candidate in @('claude.exe','claude.cmd','claude')) {
+    $command = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $command) { return [string]$command.Source }
+  }
+  foreach ($candidate in @((Join-Path $env:USERPROFILE '.local\bin\claude.exe'),(Join-Path $env:APPDATA 'npm\claude.cmd'))) {
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+  }
+  return $null
+}
+function Get-ClaudeHomePath {
+  param($Profile)
+  $homePath = [string]$Profile.claudeHome
+  if ([string]::IsNullOrWhiteSpace($homePath)) { $homePath = '~/.claude' }
+  if ($homePath -eq '~') { return $env:USERPROFILE }
+  if ($homePath.StartsWith('~/') -or $homePath.StartsWith('~\')) { return (Join-Path $env:USERPROFILE $homePath.Substring(2)) }
+  return $homePath
+}
 function Get-SetupStatus {
   param($Profile,[string]$Cli)
+  if (Test-ClaudeProfile $Profile) {
+    $current = Get-DisplayProfile $script:LastData ([string]$Profile.id)
+    if ($null -ne $current -and -not (Test-ProfileStale $current)) {
+      if (-not [string]::IsNullOrWhiteSpace([string]$current.quotaError)) { return '仅本地统计 · 未登录订阅' }
+      return '已连接'
+    }
+    $claudeHome = Get-ClaudeHomePath $Profile
+    if (Test-Path -LiteralPath (Join-Path $claudeHome '.credentials.json')) { return '已有登录信息 · 等待验证' }
+    if ([string]::IsNullOrWhiteSpace($script:ClaudeCli)) { return '未安装 Claude Code' }
+    return '未登录'
+  }
   if ([string]::IsNullOrWhiteSpace($Cli)) { return '未安装 Codex CLI' }
   $current = Get-DisplayProfile $script:LastData ([string]$Profile.id)
   if ($null -ne $current -and -not (Test-ProfileStale $current)) { return '已连接' }
@@ -144,25 +180,25 @@ function Show-AccountSettings {
   $script:SetupDialog.Text = '账号与首次使用'
   $script:SetupDialog.Icon = $script:AppIcon
   $script:SetupDialog.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterParent
-  $script:SetupDialog.ClientSize = New-Object System.Drawing.Size -ArgumentList (U 500),(U 360)
+  $script:SetupDialog.ClientSize = New-Object System.Drawing.Size -ArgumentList (U 500),(U 440)
   $script:SetupDialog.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
   $script:SetupDialog.MaximizeBox = $false
   $script:SetupDialog.MinimizeBox = $false
   $script:SetupDialog.BackColor = $script:Theme.PopupBack
   $script:SetupDialog.ForeColor = $script:Theme.TextPrimary
   $script:SetupDialog.Font = New-UiFont
-  $intro = New-Label -Text '选择显示的账号并命名；每个账号独立登录。' -Size 10
+  $intro = New-Label -Text '选择显示的账号并命名：两个 Codex 账号 + 一个 Claude 账号，各自独立登录。' -Size 10
   $intro.Dock = 'None'
   $intro.SetBounds((U 20),(U 16),(U 460),(U 32))
   $script:SetupDialog.Controls.Add($intro)
   $script:SetupRows = @()
   $rowIndex = 0
-  foreach ($id in @('personal','work')) {
+  foreach ($id in @(Get-AllAccountIds)) {
     $profile = Get-DisplayProfile $script:ProfileConfig $id
     if ($null -eq $profile) { continue }
     $enabled = New-Object System.Windows.Forms.CheckBox
     $enabled.Checked = Get-ProfileEnabled $profile
-    $enabled.Text = if ($id -eq 'personal') { '账号 1' } else { '账号 2' }
+    $enabled.Text = if ($id -eq 'personal') { 'Codex 1' } elseif ($id -eq 'work') { 'Codex 2' } else { 'Claude' }
     $enabled.SetBounds((U 20),(U (64+80*$rowIndex)),(U 90),(U 30))
     $name = New-Object System.Windows.Forms.TextBox
     $name.Text = Get-AccountName $id
@@ -180,22 +216,24 @@ function Show-AccountSettings {
     $script:SetupRows += @{ profile=$profile; enabled=$enabled; name=$name; status=$status; login=$login }
     $rowIndex++
   }
-  $hint = New-Label -Text '安装或浏览器登录完成后，点击“重新检测”。' -Size 9 -Muted
-  $hint.Dock='None'; $hint.SetBounds((U 20),(U 242),(U 460),(U 30))
+  $hint = New-Label -Text '安装或浏览器登录完成后，点击“重新检测”。Claude 读取 Claude Code 的登录与本机会话记录。' -Size 9 -Muted
+  $hint.Dock='None'; $hint.SetBounds((U 20),(U 310),(U 460),(U 44))
   $script:SetupDialog.Controls.Add($hint)
   $detect = New-Button '重新检测'
-  $detect.Dock='None'; $detect.SetBounds((U 20),(U 298),(U 120),(U 36))
+  $detect.Dock='None'; $detect.SetBounds((U 20),(U 378),(U 120),(U 36))
   $script:SetupDialog.Controls.Add($detect)
   $apply = New-Button '保存'
   $apply.Name = 'saveAccounts'
-  $apply.Dock='None'; $apply.SetBounds((U 358),(U 298),(U 120),(U 36))
+  $apply.Dock='None'; $apply.SetBounds((U 358),(U 378),(U 120),(U 36))
   $script:SetupDialog.Controls.Add($apply)
   $script:RefreshSetup = {
     $cli = Find-SetupCli
     $script:ProfileCli = $cli
+    $script:ClaudeCli = Find-ClaudeCli
     foreach ($row in $script:SetupRows) {
       $row.status.Text = Get-SetupStatus $row.profile $cli
-      $row.login.Text = if ([string]::IsNullOrWhiteSpace($cli)) { '安装 CLI' } else { '登录 / 切换' }
+      $missing = if (Test-ClaudeProfile $row.profile) { [string]::IsNullOrWhiteSpace($script:ClaudeCli) } else { [string]::IsNullOrWhiteSpace($cli) }
+      $row.login.Text = if ($missing) { '安装 / 登录' } else { '登录 / 切换' }
     }
   }
   $detect.Add_Click({

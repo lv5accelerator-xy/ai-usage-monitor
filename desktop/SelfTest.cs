@@ -78,6 +78,27 @@ namespace CodexUsageDesktop {
                 Check(profiles.Length == 2 && (bool)UsageReader.Get(profiles[0], "ok") && (bool)UsageReader.Get(profiles[1], "ok"), "Both accounts survive process launch, RPC and result conversion");
             } finally { for (int i = 0; i < names.Length; i++) Environment.SetEnvironmentVariable(names[i], previous[i]); }
         }
+        static void CheckClaudeReader(string root) {
+            string home = Path.Combine(root, "claude-fixture-home");
+            string data = Path.Combine(root, "claude-fixture-data");
+            Directory.CreateDirectory(Path.Combine(home, "projects", "p"));
+            Directory.CreateDirectory(data);
+            File.WriteAllText(Path.Combine(home, ".credentials.json"), "{\"claudeAiOauth\":{\"accessToken\":\"fixture-token\",\"subscriptionType\":\"pro\"}}");
+            string stamp = DateTimeOffset.UtcNow.AddSeconds(-5).ToString("o");
+            File.WriteAllText(Path.Combine(home, "projects", "p", "s.jsonl"), "{\"type\":\"assistant\",\"requestId\":\"r\",\"timestamp\":\"" + stamp + "\",\"message\":{\"id\":\"m\",\"model\":\"claude-sonnet-4-6\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}\n");
+            var previous = ClaudeReader.HttpGet;
+            string seen = null;
+            try {
+                ClaudeReader.HttpGet = (url, token) => { seen = token; return "{\"five_hour\":{\"utilization\":20,\"resets_at\":null},\"seven_day\":{\"utilization\":50}}"; };
+                string config = Path.Combine(data, "profiles.json");
+                File.WriteAllText(config, "{\"profiles\":[{\"id\":\"claude\",\"label\":\"Claude\",\"provider\":\"claude\",\"claudeHome\":\"" + home.Replace("\\", "\\\\") + "\"}]}");
+                var profiles = (object[])UsageReader.Get(Normalize(UsageReader.ReadProfiles(config, null)), "profiles");
+                Check(profiles.Length == 1 && (bool)UsageReader.Get(profiles[0], "ok"), "Claude account reads without a Codex CLI");
+                Check(UsageReader.Number(UsageReader.Get(UsageReader.Get(profiles[0], "fiveHour"), "remainingPercent")) == 80, "Claude 5-hour utilization converts to remaining quota");
+                Check(UsageReader.Number(UsageReader.Get(UsageReader.Get(UsageReader.Get(profiles[0], "localUsage"), "today"), "totalTokens")) == 15, "Claude local usage is summarized");
+                Check(seen == "fixture-token" && !File.ReadAllText(Path.Combine(data, "claude-usage-cache.json")).Contains("fixture-token"), "Claude token is used but never cached");
+            } finally { ClaudeReader.HttpGet = previous; }
+        }
         public static int RpcFixture() {
             string line;
             while ((line = Console.ReadLine()) != null) {
@@ -129,6 +150,7 @@ namespace CodexUsageDesktop {
                 Check(UsageReader.Number(UsageReader.Get(UsageReader.Get(mapped, "fiveHour"), "remainingPercent")) == 75, "Native reader accepts mapped snapshots");
                 CheckParallelReader(root);
                 CheckNativePipeline(root);
+                CheckClaudeReader(root);
                 string previousData = Environment.GetEnvironmentVariable("CODEX_USAGE_DATA_DIR");
                 string previousRead = Environment.GetEnvironmentVariable("CODEX_USAGE_READ_ID");
                 try {

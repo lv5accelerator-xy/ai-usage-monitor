@@ -1,7 +1,7 @@
 {
   "name": "Codex 额度",
   "short_name": "Codex Usage",
-  "description": "安全查看 Windows Codex Personal 和 Work 额度",
+  "description": "安全查看 Windows 电脑上的 Codex 与 Claude 额度",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

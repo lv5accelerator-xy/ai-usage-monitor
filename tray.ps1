@@ -115,45 +115,54 @@ try {
     exit 0
   }
 
+  # HUD theme: deep navy surfaces, neon cyan (Codex) / violet (Claude) accents.
+  # Amber and red stay reserved for low quota so status remains unambiguous.
   $script:Theme = @{
-    PopupBack = [System.Drawing.ColorTranslator]::FromHtml('#16171B')
-    HeaderBack = [System.Drawing.ColorTranslator]::FromHtml('#16171B')
-    CardBack = [System.Drawing.ColorTranslator]::FromHtml('#202228')
-    CardBorder = [System.Drawing.ColorTranslator]::FromHtml('#343740')
-    TextPrimary = [System.Drawing.ColorTranslator]::FromHtml('#F0F1F4')
-    TextMuted = [System.Drawing.ColorTranslator]::FromHtml('#A1A5B2')
-    Danger = [System.Drawing.ColorTranslator]::FromHtml('#F08080')
-    Warning = [System.Drawing.ColorTranslator]::FromHtml('#E5B66F')
-    Good = [System.Drawing.ColorTranslator]::FromHtml('#8A9ED6')
-    Track = [System.Drawing.ColorTranslator]::FromHtml('#30333C')
-    ButtonBack = [System.Drawing.ColorTranslator]::FromHtml('#303540')
-    ButtonBorder = [System.Drawing.ColorTranslator]::FromHtml('#454B59')
-    BallBack = [System.Drawing.ColorTranslator]::FromHtml('#202228')
+    PopupBack = [System.Drawing.ColorTranslator]::FromHtml('#060A13')
+    HeaderBack = [System.Drawing.ColorTranslator]::FromHtml('#060A13')
+    CardBack = [System.Drawing.ColorTranslator]::FromHtml('#0B1322')
+    CardBorder = [System.Drawing.ColorTranslator]::FromHtml('#1A2B45')
+    TextPrimary = [System.Drawing.ColorTranslator]::FromHtml('#E4F3FF')
+    TextMuted = [System.Drawing.ColorTranslator]::FromHtml('#7D8FAD')
+    Danger = [System.Drawing.ColorTranslator]::FromHtml('#FF4D6D')
+    Warning = [System.Drawing.ColorTranslator]::FromHtml('#FFB547')
+    Good = [System.Drawing.ColorTranslator]::FromHtml('#22E3FF')
+    Track = [System.Drawing.ColorTranslator]::FromHtml('#14223A')
+    ButtonBack = [System.Drawing.ColorTranslator]::FromHtml('#0C1A2E')
+    ButtonBorder = [System.Drawing.ColorTranslator]::FromHtml('#1E5A78')
+    ButtonHover = [System.Drawing.ColorTranslator]::FromHtml('#123150')
+    BallBack = [System.Drawing.ColorTranslator]::FromHtml('#070D18')
+    BallBorder = [System.Drawing.ColorTranslator]::FromHtml('#173352')
+    AccentCodex = [System.Drawing.ColorTranslator]::FromHtml('#22E3FF')
+    AccentClaude = [System.Drawing.ColorTranslator]::FromHtml('#B58CFF')
+    Caption = [System.Drawing.ColorTranslator]::FromHtml('#4F86B0')
   }
 
   function U { param([double]$Value) $scale = if ($null -ne $script:Popup) { $script:Popup.DisplayDpi / 96.0 } else { $script:UiScale }; return [int][Math]::Round($Value * $scale) }
 
   function New-UiFont {
-    param([single]$Size = 10,[switch]$Bold)
+    param([single]$Size = 10,[switch]$Bold,[switch]$Mono)
     if ($null -ne $script:Popup) { $Size = [single]($Size * $script:Popup.DisplayDpi / ($script:UiScale * 96)) }
-    $key = "$Size/$($Bold.IsPresent)"
+    $key = "$Size/$($Bold.IsPresent)/$($Mono.IsPresent)"
     if (-not $script:Fonts.ContainsKey($key)) {
       $style = if ($Bold) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
+      # Monospace digits read like instrument readouts; CJK text stays in YaHei.
+      $family = if ($Mono) { [CodexUsage.MonoFont]::Family } else { 'Microsoft YaHei UI' }
       $ctor = [System.Drawing.Font].GetConstructor([Type[]]@([string],[single],[System.Drawing.FontStyle],[System.Drawing.GraphicsUnit]))
-      $script:Fonts[$key] = [System.Drawing.Font]$ctor.Invoke(@('Microsoft YaHei UI',[single]$Size,$style,[System.Drawing.GraphicsUnit]::Point))
+      $script:Fonts[$key] = [System.Drawing.Font]$ctor.Invoke(@($family,[single]$Size,$style,[System.Drawing.GraphicsUnit]::Point))
     }
     return $script:Fonts[$key]
   }
 
   function New-Label {
-    param([string]$Text = '',[single]$Size = 10,[switch]$Muted,[switch]$Bold)
+    param([string]$Text = '',[single]$Size = 10,[switch]$Muted,[switch]$Bold,[switch]$Mono)
     $label = New-Object System.Windows.Forms.Label
     $label.Text = $Text
     $label.Dock = [System.Windows.Forms.DockStyle]::Fill
     $label.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 0
     $label.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
     $label.AutoEllipsis = $true
-    $label.Font = New-UiFont -Size $Size -Bold:$Bold
+    $label.Font = New-UiFont -Size $Size -Bold:$Bold -Mono:$Mono
     $label.ForeColor = if ($Muted) { $script:Theme.TextMuted } else { $script:Theme.TextPrimary }
     return $label
   }
@@ -184,19 +193,28 @@ try {
     $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $button.BackColor = $script:Theme.ButtonBack
     $button.ForeColor = $script:Theme.TextPrimary
+    $button.ForeColor = $script:Theme.AccentCodex
     $button.FlatAppearance.BorderColor = $script:Theme.ButtonBorder
-    $button.FlatAppearance.MouseOverBackColor = $script:Theme.ButtonBorder
+    $button.FlatAppearance.MouseOverBackColor = $script:Theme.ButtonHover
+    $button.FlatAppearance.MouseDownBackColor = $script:Theme.ButtonBorder
     $button.Cursor = [System.Windows.Forms.Cursors]::Hand
     $button.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 0
     return $button
   }
 
   function Get-BarColor {
-    param($Remaining)
+    param($Remaining,$Accent = $null)
     if ($null -eq $Remaining) { return $script:Theme.Track }
     if ([double]$Remaining -le 15) { return $script:Theme.Danger }
     if ([double]$Remaining -le 35) { return $script:Theme.Warning }
+    if ($null -ne $Accent) { return $Accent }
     return $script:Theme.Good
+  }
+
+  function Get-AccountAccent {
+    param([string]$Id,$Profile = $null)
+    if ($Id -eq 'claude' -or (Test-ClaudeProfile $Profile)) { return $script:Theme.AccentClaude }
+    return $script:Theme.AccentCodex
   }
 
   function Get-ValueColor {
@@ -337,7 +355,7 @@ try {
     $contentWidth = $script:Ball.ClientSize.Width - $script:Ball.Padding.Horizontal
     $contentHeight = $script:Ball.ClientSize.Height - $script:Ball.Padding.Vertical
     $index = 0
-    foreach ($id in @('personal','work')) {
+    foreach ($id in @(Get-AllAccountIds)) {
       foreach ($window in @('five','long')) {
         $ring = $script:RingCells[($id + '-' + $window)]
         $ring.Visible = $id -in $active
@@ -378,7 +396,7 @@ try {
     $script:Ball.SuspendLayout()
     try {
       $script:MonitorExpanded = $Expanded
-      $width = if (@(Get-ActiveIds).Count -eq 1) { 220 } else { 360 }
+      $width = Get-BallWidth
       $height = if ($Expanded) { Get-ExpandedHeight } else { 64 }
       Update-MonitorLayoutScale -Width $width -Height $height
       Update-MonitorOpacity
@@ -387,7 +405,7 @@ try {
       $script:Ball.Padding = if ($Expanded) {
         New-Object System.Windows.Forms.Padding -ArgumentList (B 14),(B 10),(B 14),(B 10)
       } else { New-Object System.Windows.Forms.Padding -ArgumentList (B 12),(B 4),(B 12),(B 4) }
-      $script:Ball.ClientSize = New-Object System.Drawing.Size -ArgumentList (B $(if (@(Get-ActiveIds).Count -eq 1) { 220 } else { 360 })),(B $height)
+      $script:Ball.ClientSize = New-Object System.Drawing.Size -ArgumentList (B $width),(B $height)
       $x = $script:RestLocation.X
       $y = $script:RestLocation.Y
       $area = [System.Windows.Forms.Screen]::FromPoint($script:RestLocation).WorkingArea
@@ -447,7 +465,7 @@ try {
         Move-Item -LiteralPath $temporary -Destination $script:AlertStatePath -Force
         if ($alerts.Count -gt 0) {
           $lines = @($alerts | ForEach-Object { '{0} · {1}剩余 {2}' -f $_.label,$_.title,(Format-Percent $_.remaining) })
-          $script:NotifyIcon.ShowBalloonTip(8000,'Codex 低额度提醒',($lines -join "`r`n"),[System.Windows.Forms.ToolTipIcon]::Warning)
+          $script:NotifyIcon.ShowBalloonTip(8000,'低额度提醒',($lines -join "`r`n"),[System.Windows.Forms.ToolTipIcon]::Warning)
         }
       }
     } catch { Write-TrayLog ('Notification warning: ' + $_.Exception.Message) }
@@ -478,7 +496,7 @@ try {
   }
 
   function Add-QuotaRow {
-    param($Parent,[string]$Title,$Window,[int]$Row,[switch]$Primary,[string]$Detail = '')
+    param($Parent,[string]$Title,$Window,[int]$Row,[switch]$Primary,[string]$Detail = '',$Accent = $null)
     $grid = New-Grid -Columns 2
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList ([System.Windows.Forms.SizeType]::Percent),([single]60)))
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList ([System.Windows.Forms.SizeType]::Percent),([single]40)))
@@ -488,15 +506,16 @@ try {
     $titleLabel = New-Label -Text $Title -Size 10
     $grid.Controls.Add($titleLabel,0,0)
     $remaining = if ($null -ne $Window) { $Window.remainingPercent } else { $null }
-    $pct = New-Label -Text (Format-Percent $remaining) -Size $(if ($Primary) { 23 } else { 15 }) -Bold
+    $pct = New-Label -Text (Format-Percent $remaining) -Size $(if ($Primary) { 22 } else { 14 }) -Bold -Mono
     $pct.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-    $pct.ForeColor = Get-ValueColor $remaining
+    $pct.ForeColor = if ($null -ne $remaining -and [double]$remaining -gt 35 -and $null -ne $Accent) { $Accent } else { Get-ValueColor $remaining }
     $grid.Controls.Add($pct,1,0)
     $bar = New-Object CodexUsage.QuotaBar
     $bar.Dock = [System.Windows.Forms.DockStyle]::Fill
     $bar.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 0
     $bar.Value = if ($null -eq $remaining) { 0 } else { [double]$remaining }
-    $bar.FillColor = Get-BarColor $remaining
+    $bar.FillColor = Get-BarColor $remaining $Accent
+    $bar.TrackColor = $script:Theme.Track
     $grid.Controls.Add($bar,0,1)
     $grid.SetColumnSpan($bar,2)
     $reset = New-Label -Size 9 -Muted
@@ -508,30 +527,62 @@ try {
     $Parent.SetColumnSpan($grid,2)
   }
 
+  function Add-LocalUsageRow {
+    param($Parent,$Profile,[int]$Row)
+    Add-GridRow $Parent 58
+    $local = New-Label -Text ('本机 Claude Code 用量' + "`r`n" + (Get-LocalUsageSummary $Profile.localUsage)) -Size 9 -Muted
+    $Parent.Controls.Add($local,0,$Row)
+    $Parent.SetColumnSpan($local,2)
+    $script:ToolTip.SetToolTip($local,(Get-LocalUsageDetail $Profile.localUsage))
+  }
+
   function Add-AccountCard {
     param($Profile)
+    $isClaude = Test-ClaudeProfile $Profile
     $hasMonthly = Test-MeaningfulLimit $Profile.individualLimit
+    # Wrap the whole expression: PowerShell 5.1 unrolls a one-item array returned from `if`,
+    # and a lone PSCustomObject has no .Count there.
+    $extraWindows = @(if ($isClaude) { $Profile.windows | Where-Object { $null -ne $_ -and [string]$_.kind -like 'weekly-*' } })
+    $localOnly = $isClaude -and $Profile.ok -and -not [string]::IsNullOrWhiteSpace([string]$Profile.quotaError)
     $card = New-Object CodexUsage.Surface
-    $card.Radius = U 12
+    $accent = Get-AccountAccent ([string]$Profile.id) $Profile
+    $card.Radius = U 6
+    $card.HudUnit = [single]($script:Popup.DisplayDpi / 96.0)
     $card.BackColor = $script:Theme.CardBack
     $card.BorderColor = $script:Theme.CardBorder
+    $card.AccentColor = $accent
     $card.Padding = New-Object System.Windows.Forms.Padding -ArgumentList (U 16)
     $card.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 0,0,0,(U 12)
-    $card.Height = if (-not $Profile.ok) { U 206 } elseif ($hasMonthly) { U 366 } else { U 284 }
+    if ($isClaude) {
+      # Header 36 + footer 32 + padding; rows below are summed as they are added.
+      $body = if (-not $Profile.ok) { 104 } elseif ($localOnly) { 60 } else { 100 + 82 + 82 * $extraWindows.Count }
+      if ($Profile.PSObject.Properties.Name -contains 'localUsage' -and ($Profile.ok -or $null -ne $Profile.localUsage)) { $body += 58 }
+      $card.Height = U (106 + $body)
+    } else {
+      $card.Height = if (-not $Profile.ok) { U 206 } elseif ($hasMonthly) { U 366 } else { U 284 }
+    }
     $grid = New-Grid -Columns 2
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList ([System.Windows.Forms.SizeType]::Percent),([single]60)))
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList ([System.Windows.Forms.SizeType]::Percent),([single]40)))
     Add-GridRow $grid 36
     $name = New-Label -Text ([string]$Profile.label) -Size 11 -Bold
+    $name.ForeColor = $accent
     $grid.Controls.Add($name,0,0)
     $plan = New-Label -Text ([string]$Profile.planType) -Size 9 -Muted
     if ([string]::IsNullOrWhiteSpace($plan.Text) -or $plan.Text -eq 'unknown') { $plan.Text = '账号' }
+    $plan.Text = $(if ($isClaude) { 'Claude · ' } else { 'Codex · ' }) + $plan.Text
     $plan.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
     $grid.Controls.Add($plan,1,0)
     $card.Controls.Add($grid)
-    if ($Profile.ok) {
+    if ($localOnly) {
+      Add-GridRow $grid 60
+      $note = New-Label -Text ([string]$Profile.quotaError) -Size 10 -Muted
+      $grid.Controls.Add($note,0,1)
+      $grid.SetColumnSpan($note,2)
+      $row = 2
+    } elseif ($Profile.ok) {
       Add-GridRow $grid 100
-      Add-QuotaRow $grid '5 小时 · 剩余' $Profile.fiveHour 1 -Primary
+      Add-QuotaRow $grid '5 小时 · 剩余' $Profile.fiveHour 1 -Primary -Accent $accent
       $row = 2
       if ($hasMonthly) {
         Add-GridRow $grid 82
@@ -539,19 +590,29 @@ try {
         if ($null -ne $Profile.individualLimit.used -and $null -ne $Profile.individualLimit.limit) {
           $detail = '已用 {0} / {1}' -f $Profile.individualLimit.used,$Profile.individualLimit.limit
         }
-        Add-QuotaRow $grid '工作空间 / 月度' $Profile.individualLimit $row -Detail $detail
+        Add-QuotaRow $grid '工作空间 / 月度' $Profile.individualLimit $row -Detail $detail -Accent $accent
         $row++
       }
       Add-GridRow $grid 82
-      Add-QuotaRow $grid '每周 · 剩余' $Profile.weekly $row
+      Add-QuotaRow $grid $(if ($isClaude) { '每周 · 全部模型 · 剩余' } else { '每周 · 剩余' }) $Profile.weekly $row -Accent $accent
       $row++
+      foreach ($extra in $extraWindows) {
+        Add-GridRow $grid 82
+        Add-QuotaRow $grid ([string]$extra.label + ' · 剩余') $extra $row -Accent $accent
+        $row++
+      }
     } else {
       Add-GridRow $grid 104
-      $errorLabel = New-Label -Text "暂时无法读取额度。`r`n请重试，或重新登录这个账号。" -Size 10 -Muted
+      $errorText = if ($isClaude) { "暂时无法读取 Claude 额度。`r`n" + [string]$Profile.error } else { "暂时无法读取额度。`r`n请重试，或重新登录这个账号。" }
+      $errorLabel = New-Label -Text $errorText -Size 10 -Muted
       $grid.Controls.Add($errorLabel,0,1)
       $grid.SetColumnSpan($errorLabel,2)
       $script:ToolTip.SetToolTip($errorLabel,[string]$Profile.error)
       $row = 2
+    }
+    if ($isClaude -and $Profile.PSObject.Properties.Name -contains 'localUsage' -and ($Profile.ok -or $null -ne $Profile.localUsage)) {
+      Add-LocalUsageRow $grid $Profile $row
+      $row++
     }
     Add-GridRow $grid 32
     $state = New-Label -Size 9 -Muted
@@ -602,7 +663,7 @@ try {
 
   function Update-BallSummary {
     param($Data)
-    foreach ($id in @('personal','work')) {
+    foreach ($id in @(Get-AllAccountIds)) {
       $profile = Get-DisplayProfile $Data $id
       $cells = $script:BallCells[$id]
       if ($null -eq $cells) { continue }
@@ -613,13 +674,18 @@ try {
       $cells.long.Text = Format-Percent $pair.longTerm
       $cells.five.ForeColor = Get-ValueColor $pair.fiveHour $stale
       $cells.long.ForeColor = Get-ValueColor $pair.longTerm $stale
-      $cells.name.ForeColor = if ($stale -and ($null -ne $Data -or -not [string]::IsNullOrEmpty($script:RefreshError))) { $script:Theme.Warning } else { $script:Theme.TextMuted }
-      $tip = '长周期显示每周与有效月度额度中，剩余比例较低的一项。'
+      $cells.name.ForeColor = if ($stale -and ($null -ne $Data -or -not [string]::IsNullOrEmpty($script:RefreshError))) { $script:Theme.Warning } else { Get-AccountAccent $id }
+      $tip = if (Test-ClaudeProfile $profile) { '长周期显示 Claude 每周（全部模型）剩余额度。' } else { '长周期显示每周与有效月度额度中，剩余比例较低的一项。' }
       $tip += "`r`n当前来源：" + $pair.source
       $updateText = Get-ProfileUpdateText $profile
       $tip += "`r`n" + $updateText
       if ($null -ne $profile.weekly) { $tip += "`r`n每周剩余：" + (Format-Percent $profile.weekly.remainingPercent) }
       if (Test-MeaningfulLimit $profile.individualLimit) { $tip += "`r`n工作空间 / 月度剩余：" + (Format-Percent $profile.individualLimit.remainingPercent) }
+      foreach ($extra in @($profile.windows)) { if ($null -ne $extra -and [string]$extra.kind -like 'weekly-*') { $tip += "`r`n" + [string]$extra.label + '剩余：' + (Format-Percent $extra.remainingPercent) } }
+      if (Test-ClaudeProfile $profile) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$profile.quotaError)) { $tip += "`r`n" + [string]$profile.quotaError }
+        if ($null -ne $profile.localUsage) { $tip += "`r`n" + (Get-LocalUsageSummary $profile.localUsage) }
+      }
       if ($stale -and ($null -ne $Data -or -not [string]::IsNullOrEmpty($script:RefreshError))) { $tip += "`r`n数据未更新，请刷新后确认。" }
       $script:ToolTip.SetToolTip($cells.long,$tip)
       $script:ToolTip.SetToolTip($cells.five,'5 小时窗口剩余额度。' + "`r`n" + $updateText + "`r`n" + (Get-ResetText ([string]$profile.fiveHour.resetsAt)))
@@ -632,7 +698,8 @@ try {
         $ring.Stale = $stale
         $ring.Caption = (Get-AccountName $id) + "`n" + $(if ($window -eq 'five') { '5h' } else { '长周期' })
         $ring.ForeColor = Get-ValueColor $value $stale
-        $ring.FillColor = $ring.ForeColor
+        $ring.FillColor = if ($stale -or $null -eq $value) { $script:Theme.TextMuted } else { Get-BarColor $value (Get-AccountAccent $id) }
+        $ring.CaptionColor = Get-AccountAccent $id
         $ring.AccessibleName = $ring.Caption.Replace("`n",' · ') + ' 剩余 ' + (Format-Percent $value) + $(if ($stale) { ' 数据未更新' } else { '' })
         $ringReset = if ($window -eq 'five') { $profile.fiveHour.resetsAt } else { $pair.longTermResetsAt }
         $script:ToolTip.SetToolTip($ring,($ring.AccessibleName + "`r`n" + $tip + "`r`n" + (Get-ResetText ([string]$ringReset))))
@@ -868,12 +935,12 @@ try {
 
   function Start-Login {
     param([string]$Account)
-    if ($Account -notin @('personal','work')) { return }
+    if ($Account -notin @(Get-AllAccountIds)) { return }
     $script:AlertBaselinePending = $true
-    $fileName = if ($Account -eq 'personal') { 'login-personal.bat' } else { 'login-work.bat' }
+    $fileName = if ($Account -eq 'personal') { 'login-personal.bat' } elseif ($Account -eq 'claude') { 'login-claude.bat' } else { 'login-work.bat' }
     $path = Join-Path $script:Root $fileName
     if (-not (Test-Path -LiteralPath $path)) {
-      [System.Windows.Forms.MessageBox]::Show('未找到登录文件：' + $path,'Codex 双账号额度') | Out-Null
+      [System.Windows.Forms.MessageBox]::Show('未找到登录文件：' + $path,'Codex + Claude 额度') | Out-Null
       return
     }
     Start-Process -FilePath $path -WorkingDirectory $script:Root | Out-Null
@@ -947,7 +1014,7 @@ try {
   Initialize-RemoteNotifications
   $script:Popup = New-Object CodexUsage.DpiForm
   $script:Popup.DisplayDpi = [int]($script:UiScale * 96)
-  $script:Popup.Text = 'Codex 额度'
+  $script:Popup.Text = 'Codex + Claude 额度'
   $iconPath = Join-Path $script:Root 'assets\app.ico'
   $script:AppIcon = if (Test-Path -LiteralPath $iconPath) { New-Object System.Drawing.Icon -ArgumentList $iconPath } else { [System.Drawing.SystemIcons]::Information }
   $script:Popup.Icon = $script:AppIcon
@@ -983,8 +1050,10 @@ try {
   [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList ([System.Windows.Forms.SizeType]::Absolute),([single](U 72))))
   Add-GridRow $header 30
   Add-GridRow $header 22
-  $title = New-Label -Text 'Codex 额度' -Size 15 -Bold
-  $subtitle = New-Label -Text '账号使用概览 · 所有数值均为剩余' -Size 9 -Muted
+  $title = New-Label -Text 'Codex + Claude 额度' -Size 15 -Bold
+  $title.ForeColor = $script:Theme.TextPrimary
+  $subtitle = New-Label -Text 'USAGE MONITOR // 所有数值均为剩余' -Size 9 -Muted
+  $subtitle.ForeColor = $script:Theme.Caption
   $header.Controls.Add($title,0,0)
   $header.Controls.Add($subtitle,0,1)
   $script:RefreshButton = New-Button '刷新'
@@ -1030,7 +1099,9 @@ try {
   $script:Ball.DisplayDpi = [int]($script:UiScale * 96)
   $script:Ball.Text = 'Codex 额度悬浮面板'
   $script:Ball.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
-  $script:Ball.Radius = U 16
+  $script:Ball.Radius = U 10
+  $script:Ball.BorderColor = $script:Theme.BallBorder
+  $script:Ball.AccentColor = $script:Theme.AccentCodex
   $script:Ball.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
   $script:Ball.ShowInTaskbar = $false
   $script:Ball.TopMost = [bool]$script:UiSettings.topMost
@@ -1038,11 +1109,11 @@ try {
   $script:Ball.ClientSize = New-Object System.Drawing.Size -ArgumentList (U 320),(U 142)
   $script:Ball.BackColor = $script:Theme.BallBack
   $script:Ball.Padding = New-Object System.Windows.Forms.Padding -ArgumentList (U 14),(U 10),(U 14),(U 10)
-  $initialWidth = if ($script:UiSettings.ringMode) { 60 } elseif (@(Get-ActiveIds).Count -eq 1) { 220 } else { 360 }
+  $initialWidth = if ($script:UiSettings.ringMode) { 60 } else { Get-BallWidth }
   $initialHeight = if ($script:UiSettings.ringMode) { 8 + 80 * [Math]::Max(1,@(Get-ActiveIds).Count * 2) } elseif ($script:UiSettings.compactMode) { 64 } else { Get-ExpandedHeight }
   $script:MonitorLayoutScale = Get-MonitorFitScale -Width $initialWidth -Height $initialHeight
   if ($null -ne $script:UiSettings.ballX -and $null -ne $script:UiSettings.ballY) {
-    $savedWidth = if ($script:UiSettings.ringMode) { B 60 } elseif (@(Get-ActiveIds).Count -eq 1) { B 220 } else { B 360 }
+    $savedWidth = if ($script:UiSettings.ringMode) { B 60 } else { B (Get-BallWidth) }
     $savedHeight = if ($script:UiSettings.ringMode) { B (8 + 80 * [Math]::Max(1,@(Get-ActiveIds).Count * 2)) } elseif ($script:UiSettings.compactMode) { B 64 } else { B (Get-ExpandedHeight) }
     $ballPoint = Clamp-Location -X ([int]$script:UiSettings.ballX) -Y ([int]$script:UiSettings.ballY) -Width $savedWidth -Height $savedHeight
   } else { $ballPoint = Get-DefaultBallLocation }
@@ -1053,19 +1124,22 @@ try {
   foreach ($unused in 1..2) {
     [void]$ballGrid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList ([System.Windows.Forms.SizeType]::Percent),([single]50)))
   }
-  foreach ($height in @(24,34,34,30)) { Add-GridRow $ballGrid $height }
+  Add-GridRow $ballGrid 24
+  foreach ($unused in @(Get-AllAccountIds)) { Add-GridRow $ballGrid 34 }
+  Add-GridRow $ballGrid 30
   $column = 0
   foreach ($text in @('剩余','5小时','长周期')) {
     $caption = New-Label -Text $text -Size 9 -Muted
+    $caption.ForeColor = $script:Theme.Caption
     if ($column -gt 0) { $caption.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight }
     $ballGrid.Controls.Add($caption,$column,0)
     $column++
   }
   $row = 1
-  foreach ($id in @('personal','work')) {
-    $name = New-Label -Text $(if ($id -eq 'personal') { '个人' } else { '工作' }) -Size 10 -Muted
-    $five = New-Label -Text '—' -Size 15 -Bold
-    $long = New-Label -Text '—' -Size 15 -Bold
+  foreach ($id in @(Get-AllAccountIds)) {
+    $name = New-Label -Text (Get-DefaultAccountName $id) -Size 10 -Muted
+    $five = New-Label -Text '—' -Size 14 -Bold -Mono
+    $long = New-Label -Text '—' -Size 14 -Bold -Mono
     $five.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
     $long.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
     $ballGrid.Controls.Add($name,0,$row)
@@ -1075,22 +1149,23 @@ try {
     $row++
   }
   $script:BallStatus = New-Label -Text '等待首次读取' -Size 9 -Muted
-  $ballGrid.Controls.Add($script:BallStatus,0,3)
+  $ballGrid.Controls.Add($script:BallStatus,0,$row)
   $ballGrid.SetColumnSpan($script:BallStatus,3)
   $script:Ball.Controls.Add($ballGrid)
   $script:ExpandedGrid = $ballGrid
-  $script:CompactGrid = New-Grid -Columns 2
-  foreach ($unused in 1..2) {
+  $script:CompactGrid = New-Grid -Columns (@(Get-AllAccountIds).Count)
+  foreach ($unused in @(Get-AllAccountIds)) {
     [void]$script:CompactGrid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList ([System.Windows.Forms.SizeType]::Percent),([single]50)))
   }
   Add-GridRow $script:CompactGrid 30
   Add-GridRow $script:CompactGrid 22
   $index = 0
-  foreach ($id in @('personal','work')) {
+  foreach ($id in @(Get-AllAccountIds)) {
     $label = New-Object CodexUsage.SplitQuotaLabel
     $label.Dock = [System.Windows.Forms.DockStyle]::Fill
     $label.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 0
     $label.Font = New-UiFont -Size 9 -Bold
+    $label.SeparatorColor = $script:Theme.Caption
     $script:CompactCells[$id] = $label
     $script:CompactGrid.Controls.Add($label,$index,0)
     $recovery = New-Label -Text '5h / 长周期 · 剩余' -Size 8 -Muted
@@ -1105,11 +1180,12 @@ try {
   $script:RingPanel = New-Object System.Windows.Forms.Panel
   $script:RingPanel.Dock = 'Fill'
   $script:RingPanel.Visible = $false
-  foreach ($id in @('personal','work')) {
+  foreach ($id in @(Get-AllAccountIds)) {
     foreach ($window in @('five','long')) {
       $ring = New-Object CodexUsage.QuotaRing
       $ring.BackColor = $script:Theme.BallBack
       $ring.ForeColor = $script:Theme.TextMuted
+      $ring.TrackColor = $script:Theme.Track
       $script:RingCells[($id + '-' + $window)] = $ring
       $script:RingPanel.Controls.Add($ring)
     }
@@ -1168,6 +1244,9 @@ try {
 
   $menu = New-Object System.Windows.Forms.ContextMenuStrip
   $script:MonitorMenu = $menu
+  $menu.Renderer = New-Object CodexUsage.HudMenuRenderer -ArgumentList $script:Theme.CardBack,$script:Theme.CardBorder,$script:Theme.ButtonHover,$script:Theme.TextPrimary,$script:Theme.TextMuted,$script:Theme.AccentCodex
+  $menu.BackColor = $script:Theme.CardBack
+  $menu.ForeColor = $script:Theme.TextPrimary
   $itemCompact = $menu.Items.Add('紧凑模式（悬停展开）')
   $itemCompact.CheckOnClick = $true
   $itemCompact.Checked = [bool]$script:UiSettings.compactMode
@@ -1314,6 +1393,7 @@ try {
   $loginMenu.Text = '账号登录 / 切换'
   $itemPersonal = $loginMenu.DropDownItems.Add('个人账号')
   $itemWork = $loginMenu.DropDownItems.Add('工作账号')
+  $itemClaude = $loginMenu.DropDownItems.Add('Claude 账号')
   [void]$menu.Items.Add($loginMenu)
   [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
   $clientMenu = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -1358,6 +1438,7 @@ try {
   $itemReset.Add_Click({ Reset-UiPositions })
   $itemPersonal.Add_Click({ Start-Login 'personal' })
   $itemWork.Add_Click({ Start-Login 'work' })
+  $itemClaude.Add_Click({ Start-Login 'claude' })
   $itemLogs.Add_Click({ Start-Process explorer.exe -ArgumentList $script:LogDir | Out-Null })
   $itemExit.Add_Click({ Exit-App })
 
@@ -1367,7 +1448,7 @@ try {
 
   $script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
   $script:NotifyIcon.Icon = $script:AppIcon
-  $script:NotifyIcon.Text = 'Codex 双账号额度'
+  $script:NotifyIcon.Text = 'Codex + Claude 额度'
   $script:NotifyIcon.ContextMenuStrip = $menu
   $script:NotifyIcon.Add_MouseClick({
     param($sender,$eventArgs)
@@ -1377,7 +1458,7 @@ try {
   Start-RemoteWorker
 
   Apply-ProfileLayout
-  $script:Ball.Add_ScaleChanged({ $script:Ball.Radius = B 16; Remember-MonitorPosition; if ($script:UiSettings.ringMode) { Set-MonitorExpanded $false } })
+  $script:Ball.Add_ScaleChanged({ $script:Ball.Radius = B 10; $script:Ball.HudUnit = [single]((B 100) / 100.0); Remember-MonitorPosition; if ($script:UiSettings.ringMode) { Set-MonitorExpanded $false } })
   $script:Popup.Add_ScaleChanged({ Update-CardWidths })
   $desktopChangeHandler = {
     param($sender,$eventArgs)

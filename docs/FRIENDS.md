@@ -1,6 +1,13 @@
-# Codex 额度：安装与分享指南
+# Codex + Claude 额度：安装与分享指南
 
-这是一个独立开发的 Windows 10/11 桌面工具，用于查看个人和工作 Codex 账号的剩余额度，不是 OpenAI 官方客户端。
+这是一个独立开发的 Windows 10/11 桌面工具，用于查看个人和工作 Codex 账号，以及一个 Claude 账号的剩余额度，不是 OpenAI 或 Anthropic 官方客户端。
+
+## Claude 账号（v1.0 新增）
+
+1. 先安装并登录 Claude Code（订阅 Pro / Max 账号）。也可以在右键菜单 **账号登录 / 切换 → Claude 账号** 中按提示安装，然后在 Claude Code 里输入 `/login`。
+2. 打开 **账号与首次使用**，勾选 **Claude**，保存。
+3. Claude 卡片显示 5 小时和每周（全部模型）剩余额度；下方显示本机 Claude Code 今日和近 7 天的 token 用量，以及按 API 公开价格估算的费用（订阅用户并不按 token 付费，仅供参考）。
+4. 提示“登录已过期”时，打开 Claude Code 运行一次即可，本工具不会改动 Claude 的登录信息。没有订阅登录时仍会显示本机用量。
 
 ## 第一次使用
 

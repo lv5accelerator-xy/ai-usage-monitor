@@ -70,7 +70,8 @@ foreach ($entry in @(@{ form = $script:Popup; name = 'detail.png' },@{ form = $s
 $setupPreview = Show-AccountSettings -PreviewTest
 $setupPreview.Show()
 [System.Windows.Forms.Application]::DoEvents()
-Assert-Ui ($script:SetupRows.Count -eq 2) 'Setup page exposes both account slots.'
+Assert-Ui ($script:SetupRows.Count -eq 3) 'Setup page exposes two Codex slots and one Claude slot.'
+Assert-Ui ($script:SetupRows[2].enabled.Text -eq 'Claude') 'The third slot is the Claude account.'
 Assert-Ui ($script:SetupRows[0].name.MaxLength -eq 12) 'Names have a bounded readable length.'
 $setupBitmap = New-Object System.Drawing.Bitmap -ArgumentList $setupPreview.Width,$setupPreview.Height
 try {
@@ -374,6 +375,89 @@ $itemRings.PerformClick()
 Assert-Ui (-not $script:UiSettings.ringMode) 'Menu must restore compact mode.'
 Assert-Ui $script:CompactGrid.Visible 'Compact strip must be restored.'
 Write-Output 'Ring mode: four edges, single account, stale/missing data and menu switching passed.'
+
+# v1.0 Claude slot: three-account geometry, Claude card variants, rings and compact cells.
+$claudeProfile = [pscustomobject]@{
+  id = 'claude'; label = 'Claude'; provider = 'claude'; ok = $true; planType = 'Max 5x'; fetchedAt = $fixtureTime; quotaError = $null
+  fiveHour = [pscustomobject]@{ kind = '5h'; label = '5 小时'; remainingPercent = 80; resetsAt = $resetTime }
+  weekly = [pscustomobject]@{ kind = 'weekly'; label = 'Weekly'; remainingPercent = 55; resetsAt = $resetTime }
+  windows = @([pscustomobject]@{ kind = 'weekly-sonnet'; label = 'Sonnet 每周'; remainingPercent = 61; resetsAt = $resetTime })
+  individualLimit = $null
+  localUsage = [pscustomobject]@{
+    today = [pscustomobject]@{ inputTokens = 1000; outputTokens = 2000; cacheWriteTokens = 3000; cacheReadTokens = 1200000; totalTokens = 1206000; costUsd = 1.23; messages = 42 }
+    week = [pscustomobject]@{ totalTokens = 9800000; costUsd = 15.5; messages = 300 }
+    days = @([pscustomobject]@{ date = '2026-11-16'; totalTokens = 1206000; costUsd = 1.23 }); topModelToday = 'Opus 5.5'
+  }
+}
+$claudeSample = [pscustomobject]@{ fetchedAt = $fixtureTime; profiles = @($sample.profiles[0],$sample.profiles[1],$claudeProfile) }
+$script:ProfileConfig.profiles[2].enabled = $true
+Apply-ProfileLayout
+Set-MonitorExpanded $false
+Assert-Ui ($script:Ball.Width -eq (B 510)) 'Three accounts widen the compact strip.'
+Set-MonitorExpanded $true
+Assert-Ui ($script:Ball.Height -eq (B 176)) 'Three accounts add one expanded row.'
+$script:LastData = Merge-DisplayData $null $claudeSample
+Render-Data $script:LastData
+[System.Windows.Forms.Application]::DoEvents()
+Assert-Ui ($script:ContentPanel.Controls.Count -eq 3) 'Codex and Claude cards render together.'
+Assert-Ui ($script:BallCells.claude.five.Text -eq '80%' -and $script:BallCells.claude.long.Text -eq '55%') 'Claude summary shows 5-hour and weekly remaining.'
+Assert-Ui ($script:ToolTip.GetToolTip($script:BallCells.claude.long) -match 'Sonnet 每周' -and $script:ToolTip.GetToolTip($script:BallCells.claude.long) -match 'tokens') 'Claude tooltip lists model weekly quota and local usage.'
+$claudeCard = $script:ContentPanel.Controls[2]
+$claudeTexts = @(Get-ControlTree $claudeCard | ForEach-Object { [string]$_.Text })
+Assert-Ui (@($claudeTexts | Where-Object { $_ -match '本机 Claude Code 用量' -and $_ -match '1\.2M' }).Count -eq 1) 'Claude card shows local token usage.'
+Assert-Ui (@($claudeTexts | Where-Object { $_ -eq 'Claude · Max 5x' }).Count -eq 1) 'Claude card identifies the provider and plan.'
+Assert-Ui (@($claudeTexts | Where-Object { $_ -eq 'Sonnet 每周 · 剩余' }).Count -eq 1) 'Model-specific weekly quota gets its own row.'
+foreach ($width in @(620,380)) {
+  $script:Popup.Width = U $width
+  [System.Windows.Forms.Application]::DoEvents()
+  foreach ($card in $script:ContentPanel.Controls) {
+    $grid = $card.Controls[0]
+    foreach ($child in $grid.Controls) {
+      Assert-Ui ($child.Bottom -le $grid.ClientSize.Height -and $child.Right -le $grid.ClientSize.Width) 'Claude card rows must fit inside the card.'
+    }
+  }
+}
+$script:Popup.Width = U 440
+[System.Windows.Forms.Application]::DoEvents()
+foreach ($entry in @(@{ form = $script:Popup; name = 'detail-claude.png' },@{ form = $script:Ball; name = 'floating-claude.png' })) {
+  $bitmap = New-Object System.Drawing.Bitmap -ArgumentList $entry.form.Width,$entry.form.Height
+  try {
+    $entry.form.DrawToBitmap($bitmap,(New-Object System.Drawing.Rectangle -ArgumentList 0,0,$entry.form.Width,$entry.form.Height))
+    $bitmap.Save((Join-Path $outputDir $entry.name),[System.Drawing.Imaging.ImageFormat]::Png)
+  } finally { $bitmap.Dispose() }
+}
+Set-MonitorExpanded $false
+Update-BallSummary $script:LastData
+Assert-Ui ($script:CompactCells.claude.Text -eq 'Claude 80% / 55%') 'Compact strip shows the Claude pair.'
+$bitmap = New-Object System.Drawing.Bitmap -ArgumentList $script:Ball.Width,$script:Ball.Height
+try {
+  $script:Ball.DrawToBitmap($bitmap,(New-Object System.Drawing.Rectangle -ArgumentList 0,0,$script:Ball.Width,$script:Ball.Height))
+  $bitmap.Save((Join-Path $outputDir 'compact-claude.png'),[System.Drawing.Imaging.ImageFormat]::Png)
+} finally { $bitmap.Dispose() }
+foreach ($variant in @(
+  [pscustomobject]@{ id = 'claude'; label = 'Claude'; provider = 'claude'; ok = $true; planType = '本地统计'; fetchedAt = $fixtureTime; fiveHour = $null; weekly = $null; windows = @(); individualLimit = $null; quotaError = '未检测到 Claude 订阅登录，只显示本机 Claude Code 用量。'; localUsage = $claudeProfile.localUsage },
+  [pscustomobject]@{ id = 'claude'; label = 'Claude'; provider = 'claude'; ok = $false; fetchedAt = $fixtureTime; error = 'Claude 登录已过期：打开 Claude Code 运行一次。'; localUsage = $claudeProfile.localUsage },
+  [pscustomobject]@{ id = 'claude'; label = 'Claude'; provider = 'claude'; ok = $false; fetchedAt = $fixtureTime; error = '未检测到 Claude Code 登录。' }
+)) {
+  Render-Data ([pscustomobject]@{ fetchedAt = $fixtureTime; profiles = @($sample.profiles[0],$sample.profiles[1],$variant) })
+  [System.Windows.Forms.Application]::DoEvents()
+  $grid = $script:ContentPanel.Controls[2].Controls[0]
+  foreach ($child in $grid.Controls) { Assert-Ui ($child.Bottom -le $grid.ClientSize.Height) 'Local-only and error Claude cards fit.' }
+}
+Update-BallSummary ([pscustomobject]@{ profiles = @($sample.profiles[0],$sample.profiles[1],[pscustomobject]@{ id = 'claude'; label = 'Claude'; provider = 'claude'; ok = $true; fetchedAt = $fixtureTime; fiveHour = $null; weekly = $null; quotaError = 'x' }) })
+Assert-Ui ($script:BallCells.claude.five.Text -eq '—') 'Missing Claude quota is shown as unknown, never 0% or 100%.'
+$script:UiSettings.ringMode = $true
+Set-MonitorExpanded $false
+Assert-Ui ($script:RingCells['claude-five'].Visible -and $script:RingCells['claude-long'].Visible) 'Claude rings are visible.'
+Assert-Ui ($script:Ball.Height -eq (B (8 + 80 * 6))) 'Three accounts stack six rings.'
+$script:UiSettings.ringMode = $false
+$script:ProfileConfig.profiles[2].enabled = $false
+Apply-ProfileLayout
+Assert-Ui (-not $script:CompactCells.claude.Visible -and -not $script:RingCells['claude-five'].Visible) 'Disabled Claude slot is hidden everywhere.'
+Assert-Ui ($script:Ball.Width -eq (B 360)) 'Disabling Claude restores the two-account strip.'
+$script:LastData = Merge-DisplayData $null $sample
+Render-Data $script:LastData
+Write-Output 'Claude slot: geometry, cards, local usage, rings and hiding passed.'
 
 # Accelerated lifetime regression: 60 warmup + 180 measured refreshes,
 # status/hover callbacks, and a real WinForms message pump. No forced GC in app.

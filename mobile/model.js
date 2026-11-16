@@ -34,11 +34,49 @@
     };
   }
 
+  const KNOWN_IDS = ['personal', 'work', 'claude'];
+
+  function nonNegative(value) {
+    if (value === null || value === undefined || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : null;
+  }
+
+  function normalizeLocalUsage(value) {
+    if (!value || typeof value !== 'object') return null;
+    const result = {};
+    for (const period of ['today', 'week']) {
+      const entry = value[period];
+      if (!entry || typeof entry !== 'object') return null;
+      const totalTokens = nonNegative(entry.totalTokens);
+      if (totalTokens === null) return null;
+      result[period] = { totalTokens, costUsd: nonNegative(entry.costUsd) };
+    }
+    return result;
+  }
+
+  function formatTokens(value) {
+    const number = nonNegative(value);
+    if (number === null) return '—';
+    if (number >= 1e9) return `${(number / 1e9).toFixed(1)}B`;
+    if (number >= 1e6) return `${(number / 1e6).toFixed(1)}M`;
+    if (number >= 1e3) return `${(number / 1e3).toFixed(1)}K`;
+    return String(Math.round(number));
+  }
+
+  function formatUsd(value) {
+    const number = nonNegative(value);
+    if (number === null) return '—';
+    if (number > 0 && number < 0.01) return '<$0.01';
+    return `$${number.toFixed(2)}`;
+  }
+
   function validateSnapshot(value) {
     if (!value || value.version !== 1 || value.type !== 'usage_snapshot') throw new Error('不支持的额度消息');
     if (!validDate(value.publishedAt) || !Array.isArray(value.profiles)) throw new Error('额度消息格式无效');
-    const profiles = value.profiles.map((profile) => {
-      if (!profile || !['personal', 'work'].includes(profile.id) || typeof profile.ok !== 'boolean') throw new Error('账号数据格式无效');
+    // Unknown future account ids are skipped instead of rejecting the whole snapshot.
+    const profiles = value.profiles.filter((profile) => profile && KNOWN_IDS.includes(profile.id)).map((profile) => {
+      if (typeof profile.ok !== 'boolean') throw new Error('账号数据格式无效');
       if (profile.fetchedAt !== null && profile.fetchedAt !== undefined && !validDate(profile.fetchedAt)) throw new Error('账号更新时间无效');
       const longTerm = normalizeWindow(profile.longTerm);
       if (longTerm && !['weekly', 'workspace'].includes(longTerm.kind)) throw new Error('长周期类型无效');
@@ -49,7 +87,8 @@
         status: profile.status === 'ok' ? 'ok' : 'error',
         fetchedAt: profile.fetchedAt || null,
         fiveHour: normalizeWindow(profile.fiveHour, '5h'),
-        longTerm
+        longTerm,
+        localUsage: profile.id === 'claude' ? normalizeLocalUsage(profile.localUsage) : null
       };
     });
     return {
@@ -100,5 +139,5 @@
     return 'normal';
   }
 
-  scope.CodexMobileModel = Object.freeze({ clampPercent, formatPercent, validateSnapshot, getFreshness, formatCountdown, formatAge, quotaTone });
+  scope.CodexMobileModel = Object.freeze({ clampPercent, formatPercent, formatTokens, formatUsd, validateSnapshot, getFreshness, formatCountdown, formatAge, quotaTone });
 })(globalThis);

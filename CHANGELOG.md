@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.0 - 2026-11-16
+
+- Add a Claude account slot next to the two Codex accounts. It reads the Claude subscription 5-hour and weekly (all-model) quota from Claude Code's own login, plus model-specific weekly windows (Sonnet / Opus) when Claude reports them.
+- Add local Claude Code usage statistics from `~/.claude/projects/**/*.jsonl`: today and seven-day token totals (input / output / cache write / cache read), request count, main model, a daily breakdown and an API-price cost estimate. Streaming duplicates and messages copied into resumed sessions are counted once; files are read incrementally from a cached offset.
+- Without a Claude subscription login, the Claude card still shows local usage; quota is shown as unknown, never as 0% or 100%.
+- Claude credentials are read-only: the access token is used for one HTTPS request and never cached, logged or refreshed (refreshing would rotate Claude Code's refresh token). Expired logins and rate limits are reported with recovery hints.
+- Respect the usage endpoint's rate limits: reuse a two-minute quota cache and fall back to a recent (15 min) cache on 429 / network / server errors; older data is marked stale as before.
+- A missing Codex CLI now fails only Codex accounts; Claude keeps updating.
+- Floating monitor, compact strip, rings, detail panel, account setup, tray login menu and notifications support three accounts. Older `profiles.json` files gain a Claude slot automatically, enabled only when Claude Code is already used on the computer.
+- iPhone PWA shows the Claude card and aggregate local usage; unknown future account ids are skipped instead of rejecting the snapshot. The service worker cache is versioned for the update.
+- Add a guided `login-claude.bat` that installs Claude Code with Anthropic's official command when missing and opens it for `/login`.
+- Add offline Claude reader, model, mobile and packaged self-test coverage.
+
 ## 0.9.4 - 2026-10-13
 
 - Preserve positive quota below 1% as `<1%` in desktop and mobile views, including the mobile transport; missing and invalid values stay unknown.

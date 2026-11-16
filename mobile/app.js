@@ -87,10 +87,10 @@
 
   function createAccountCard(profile, freshness) {
     const stale = freshness.level === 'stale' || freshness.level === 'expired' || !profile.ok;
-    const card = makeElement('article', `account-card${stale ? ' stale' : ''}`);
+    const card = makeElement('article', `account-card provider-${profile.id === 'claude' ? 'claude' : 'codex'}${stale ? ' stale' : ''}`);
     const header = makeElement('header', 'account-header');
     const titleWrap = makeElement('div');
-    titleWrap.append(makeElement('p', 'eyebrow', profile.id === 'personal' ? 'PERSONAL' : 'WORK'));
+    titleWrap.append(makeElement('p', 'eyebrow', profile.id === 'personal' ? 'CODEX · PERSONAL' : profile.id === 'claude' ? 'CLAUDE' : 'CODEX · WORK'));
     titleWrap.append(makeElement('h2', '', profile.label));
     header.append(titleWrap);
     header.append(makeElement('span', `account-state ${profile.ok ? 'ok' : 'error'}`, profile.ok ? '已连接' : '读取失败'));
@@ -108,6 +108,11 @@
       resets.append(makeElement('dd', '', description));
     });
     card.append(resets);
+    if (profile.localUsage) {
+      const usage = profile.localUsage;
+      card.append(makeElement('p', 'local-usage',
+        `本机用量 · 今日 ${CodexMobileModel.formatTokens(usage.today.totalTokens)} tokens ≈${CodexMobileModel.formatUsd(usage.today.costUsd)} · 近 7 天 ${CodexMobileModel.formatTokens(usage.week.totalTokens)} ≈${CodexMobileModel.formatUsd(usage.week.costUsd)}`));
+    }
     if (!profile.ok) card.append(makeElement('p', 'account-error', `${profile.label} 数据读取失败`));
     return card;
   }

@@ -137,3 +137,84 @@ function Get-RecoveryKey {
   } catch {}
   return $null
 }
+
+# ---- Accounts: two Codex slots plus one Claude slot (v1.0).
+function Get-AllAccountIds { return @('personal','work','claude') }
+
+function Get-DefaultAccountName {
+  param([string]$Id)
+  if ($Id -eq 'personal') { return '个人' }
+  if ($Id -eq 'claude') { return 'Claude' }
+  return '工作'
+}
+
+function Test-ClaudeProfile {
+  param($Profile)
+  return ($null -ne $Profile -and ([string]$Profile.provider -eq 'claude' -or [string]$Profile.id -eq 'claude'))
+}
+
+# Adds the Claude slot to configurations created before v1.0. Returns $true when changed.
+# It starts enabled only when Claude Code is already set up on this computer.
+function Add-ClaudeProfileIfMissing {
+  param([Parameter(Mandatory = $true)]$Config,[string]$UserProfile = $env:USERPROFILE)
+  foreach ($profile in @($Config.profiles)) { if ([string]$profile.id -eq 'claude') { return $false } }
+  $claudeHome = if ([string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) { Join-Path $UserProfile '.claude' } else { $env:CLAUDE_CONFIG_DIR }
+  $detected = (Test-Path -LiteralPath (Join-Path $claudeHome '.credentials.json')) -or (Test-Path -LiteralPath (Join-Path $claudeHome 'projects'))
+  $entry = [pscustomobject]@{ id = 'claude'; label = 'Claude'; provider = 'claude'; claudeHome = '~/.claude'; enabled = [bool]$detected }
+  if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) { $entry.claudeHome = $env:CLAUDE_CONFIG_DIR }
+  $Config.profiles = @(@($Config.profiles) + $entry)
+  return $true
+}
+
+# Floating monitor geometry in logical pixels for 1-3 visible accounts.
+function Get-MonitorWidth {
+  param([int]$Count)
+  if ($Count -le 1) { return 220 }
+  return 360 + 150 * ($Count - 2)
+}
+function Get-ExpandedHeightFor {
+  param([int]$Count)
+  return 74 + 34 * [Math]::Max(1,$Count)
+}
+
+function Format-TokenCount {
+  param($Value)
+  try { $number = [double]$Value } catch { return '—' }
+  if ($null -eq $Value -or [double]::IsNaN($number) -or $number -lt 0) { return '—' }
+  if ($number -ge 1e9) { return ('{0:0.0}B' -f ($number / 1e9)) }
+  if ($number -ge 1e6) { return ('{0:0.0}M' -f ($number / 1e6)) }
+  if ($number -ge 1e3) { return ('{0:0.0}K' -f ($number / 1e3)) }
+  return ('{0:0}' -f $number)
+}
+
+function Format-Usd {
+  param($Value)
+  try { $number = [double]$Value } catch { return '—' }
+  if ($null -eq $Value -or [double]::IsNaN($number) -or $number -lt 0) { return '—' }
+  if ($number -gt 0 -and $number -lt 0.01) { return '<$0.01' }
+  if ($number -ge 1000) { return ('${0:N0}' -f $number) }
+  return ('${0:0.00}' -f $number)
+}
+
+# One line for cards; tooltips get the breakdown. Cost is an API-price estimate.
+function Get-LocalUsageSummary {
+  param($Usage)
+  if ($null -eq $Usage -or $null -eq $Usage.today) { return '本机 Claude Code 用量：暂无记录' }
+  return ('今日 {0} tokens · ≈{1}　近 7 天 {2} · ≈{3}' -f (Format-TokenCount $Usage.today.totalTokens),(Format-Usd $Usage.today.costUsd),(Format-TokenCount $Usage.week.totalTokens),(Format-Usd $Usage.week.costUsd))
+}
+
+function Get-LocalUsageDetail {
+  param($Usage)
+  if ($null -eq $Usage -or $null -eq $Usage.today) { return '尚未在本机找到最近 7 天的 Claude Code 会话记录。' }
+  $t = $Usage.today
+  $lines = @(
+    ('今日：输入 {0} · 输出 {1} · 缓存写入 {2} · 缓存读取 {3}' -f (Format-TokenCount $t.inputTokens),(Format-TokenCount $t.outputTokens),(Format-TokenCount $t.cacheWriteTokens),(Format-TokenCount $t.cacheReadTokens)),
+    ('今日请求 {0} 次{1}' -f [int64]$t.messages,$(if ($Usage.topModelToday) { ' · 主要模型 ' + [string]$Usage.topModelToday } else { '' }))
+  )
+  foreach ($day in @($Usage.days)) {
+    if ($null -eq $day) { continue }
+    $lines += ('{0}　{1} tokens · ≈{2}' -f [string]$day.date,(Format-TokenCount $day.totalTokens),(Format-Usd $day.costUsd))
+  }
+  $lines += '费用按 Anthropic API 公开价格估算；订阅用户不按 token 计费。'
+  return ($lines -join "`r`n")
+}
