@@ -428,7 +428,7 @@ Update-Status
 $workFive = @($script:ResetLabels | Where-Object { $_.Tag.kind -eq 'fiveHour' -and [string]$_.Tag.profile.id -eq 'work' })
 $workProfile = $workFive[0].Tag.profile
 $workForecast = Get-ProfileForecast $workProfile 'fiveHour'
-Assert-Ui ($workFive.Count -eq 1) ('One work 5h reset label exists: ' + $workFive.Count)
+Assert-Ui ($workFive.Count -eq 1) ('One work 5h reset label exists: ' + $workFive.Count + ' of ' + @($script:ResetLabels).Count + ' tags=' + ((@($script:ResetLabels) | ForEach-Object { if ($null -eq $_.Tag) { 'null' } else { [string]$_.Tag.kind + '/' + [string]$_.Tag.profile.id + '/' + ($_.Tag.PSObject.Properties.Name -join ',') } }) -join '; '))
 Assert-Ui ($workFive[0].Text -match '用完') ('Card reset line shows the exhaustion forecast: "' + $workFive[0].Text + '" state=' + [string]$workForecast.state + ' remaining=' + [string]$workProfile.fiveHour.remainingPercent + ' reset=' + [string]$workProfile.fiveHour.resetsAt + ' ok=' + [string]$workProfile.ok + ' samples=' + [string]$script:UsageHistory['work|fiveHour'].Count)
 Assert-Ui ($workFive[0].ForeColor.ToArgb() -eq $script:Theme.Warning.ToArgb()) 'Forecast reset line is amber.'
 Assert-Ui ($script:ToolTip.GetToolTip($workFive[0]) -match '%/小时') 'Forecast tooltip shows the burn rate.'
