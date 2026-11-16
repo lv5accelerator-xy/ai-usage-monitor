@@ -163,4 +163,48 @@ try {
   Assert-Equal $legacy2.profiles[1].enabled $true 'Claude starts visible when Claude Code is already used here'
   Assert-Equal $legacy2.profiles[1].provider 'claude' 'Migrated slot is routed to the Claude reader'
 } finally { $env:CLAUDE_CONFIG_DIR = $savedClaudeDir; Remove-Item -Recurse -Force $migrationHome -ErrorAction SilentlyContinue }
+# v1.1: burn-rate forecast.
+$base = [DateTimeOffset]::new(2026,11,16,12,0,0,[TimeSpan]::Zero)
+$reset5 = $base.AddHours(3).ToString('o')
+$history = @{}
+function New-Sample([DateTimeOffset]$At,[double]$Five,[double]$Weekly,[string]$Reset = $reset5) {
+  [pscustomobject]@{ profiles = @([pscustomobject]@{ id = 'personal'; ok = $true; fetchedAt = $At.ToString('o')
+    fiveHour = [pscustomobject]@{ remainingPercent = $Five; resetsAt = $Reset }
+    weekly = [pscustomobject]@{ remainingPercent = $Weekly; resetsAt = $base.AddDays(3).ToString('o') } }) }
+}
+# 30% per hour: 80 -> 70 over 20 minutes, one sample per minute.
+for ($m = 0; $m -le 20; $m++) { Add-UsageSamples -History $history -Data (New-Sample $base.AddMinutes($m) (80 - $m * 0.5) 60) -Now $base.AddMinutes($m) }
+$now = $base.AddMinutes(20)
+Add-UsageSamples -History $history -Data (New-Sample $base.AddMinutes(20).AddSeconds(10) 70 60) -Now $now
+Assert-Equal $history['personal|fiveHour'].Count 21 'Samples closer than 50 seconds are not duplicated'
+$forecast = Get-BurnForecast -History $history -Id 'personal' -Kind 'fiveHour' -Window ([pscustomobject]@{ remainingPercent = 70; resetsAt = $reset5 }) -Now $now
+Assert-Equal $forecast.state 'exhaust' 'Steady consumption predicts exhaustion before reset'
+Assert-Equal ([Math]::Round($forecast.ratePerHour)) 30 'Rate is percent per hour'
+Assert-Equal ([Math]::Round($forecast.minutesLeft)) 140 '70% at 30%/h lasts 140 minutes'
+Assert-Equal ($forecast.text -match '用完') $true 'Forecast text names the exhaustion time'
+$late = Get-BurnForecast -History $history -Id 'personal' -Kind 'fiveHour' -Window ([pscustomobject]@{ remainingPercent = 70; resetsAt = $base.AddMinutes(60).ToString('o') }) -Now $now
+Assert-Equal $late.state 'none' 'Samples from another reset cycle are not mixed in'
+$safeHistory = @{}
+for ($m = 0; $m -le 20; $m++) { Add-UsageSamples -History $safeHistory -Data (New-Sample $base.AddMinutes($m) (80 - $m * 0.5) 60 $base.AddMinutes(40).ToString('o')) -Now $base.AddMinutes($m) }
+Assert-Equal (Get-BurnForecast -History $safeHistory -Id 'personal' -Kind 'fiveHour' -Window ([pscustomobject]@{ remainingPercent = 70; resetsAt = $base.AddMinutes(40).ToString('o') }) -Now $now).state 'safe' 'Quota that lasts until reset is safe'
+Assert-Equal (Get-BurnForecast -History $history -Id 'personal' -Kind 'weekly' -Window ([pscustomobject]@{ remainingPercent = 60; resetsAt = $base.AddDays(3).ToString('o') }) -Now $now).state 'none' 'Weekly needs a longer span than 20 minutes'
+$idleHistory = @{}
+for ($m = 0; $m -le 15; $m++) { Add-UsageSamples -History $idleHistory -Data (New-Sample $base.AddMinutes($m) 90 60) -Now $base.AddMinutes($m) }
+Assert-Equal (Get-BurnForecast -History $idleHistory -Id 'personal' -Kind 'fiveHour' -Window ([pscustomobject]@{ remainingPercent = 90; resetsAt = $reset5 }) -Now $base.AddMinutes(15)).state 'idle' 'No consumption is idle, not a prediction'
+$short = @{}
+Add-UsageSamples -History $short -Data (New-Sample $base 80 60) -Now $base
+Add-UsageSamples -History $short -Data (New-Sample $base.AddMinutes(3) 75 60) -Now $base.AddMinutes(3)
+Assert-Equal (Get-BurnForecast -History $short -Id 'personal' -Kind 'fiveHour' -Window ([pscustomobject]@{ remainingPercent = 75; resetsAt = $reset5 }) -Now $base.AddMinutes(3)).state 'none' 'Too short a span gives no forecast'
+$jump = @{}
+for ($m = 0; $m -le 12; $m++) { Add-UsageSamples -History $jump -Data (New-Sample $base.AddMinutes($m) (20 - $m) 60 $null) -Now $base.AddMinutes($m) }
+Add-UsageSamples -History $jump -Data (New-Sample $base.AddMinutes(13) 100 60 $null) -Now $base.AddMinutes(13)
+Assert-Equal (Get-BurnForecast -History $jump -Id 'personal' -Kind 'fiveHour' -Window ([pscustomobject]@{ remainingPercent = 100; resetsAt = $null }) -Now $base.AddMinutes(13)).state 'none' 'A jump up (reset) starts a new forecast window'
+Assert-Equal (Get-BurnForecast -History $history -Id 'personal' -Kind 'fiveHour' -Window ([pscustomobject]@{ remainingPercent = 0; resetsAt = $reset5 }) -Now $now).state 'empty' 'Exhausted quota uses the recovery countdown instead'
+$failed = [pscustomobject]@{ profiles = @([pscustomobject]@{ id = 'work'; ok = $false; fetchedAt = $now.ToString('o'); fiveHour = [pscustomobject]@{ remainingPercent = 1 } }) }
+Add-UsageSamples -History $history -Data $failed -Now $now
+Assert-Equal $history.ContainsKey('work|fiveHour') $false 'Failed reads never become samples'
+$roundTrip = ConvertFrom-HistoryJson (ConvertTo-HistoryJson $history)
+Assert-Equal $roundTrip['personal|fiveHour'].Count 21 'History survives a restart'
+Assert-Equal (Get-BurnForecast -History $roundTrip -Id 'personal' -Kind 'fiveHour' -Window ([pscustomobject]@{ remainingPercent = 70; resetsAt = $reset5 }) -Now $now).state 'exhaust' 'Reloaded history still forecasts'
+Assert-Equal ((Get-ForecastDetail $forecast) -match '30%/小时') $true 'Detail shows the rate'
 Write-Output "UI model: $script:Checks checks passed."

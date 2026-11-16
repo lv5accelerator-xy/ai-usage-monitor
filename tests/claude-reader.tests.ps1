@@ -98,6 +98,43 @@ try {
   $none = $reader::ScanLocal((Join-Path $temp 'missing'),$null,$today)
   Assert-Claude ($none['week']['messages'] -eq 0) 'A missing projects folder yields empty statistics.'
 
+  # ---- Codex rollout logs
+  $codexSessions = Join-Path $temp 'codex-home\sessions\2026\11\16'
+  New-Item -ItemType Directory -Force -Path $codexSessions | Out-Null
+  function CodexToken([DateTimeOffset]$At,[long]$Total,[long]$In,[long]$Cached,[long]$Out) {
+    return ('{"timestamp":"' + $At.ToUniversalTime().ToString('o') + '","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0,"total_tokens":' + $Total + '},"last_token_usage":{"input_tokens":' + $In + ',"cached_input_tokens":' + $Cached + ',"output_tokens":' + $Out + ',"reasoning_output_tokens":10,"total_tokens":' + ($In + $Out) + '},"model_context_window":258400},"rate_limits":{}}}')
+  }
+  $rollout = Join-Path $codexSessions 'rollout-a.jsonl'
+  $codexLines = @(
+    '{"type":"session_meta","payload":{"id":"s1","cwd":"D:\\secret-project"}}',
+    '{"type":"turn_context","payload":{"model":"gpt-5.5","cwd":"D:\\secret-project"}}',
+    (CodexToken $todayNoon 1500 1000 600 500),
+    # Same cumulative total again: a repeated event, not a new call.
+    (CodexToken $todayNoon 1500 1000 600 500),
+    '{"type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{}}}',
+    '{"type":"turn_context","payload":{"model":"gpt-5.4"}}',
+    (CodexToken $todayNoon.AddMinutes(1) 3700 2000 0 200),
+    (CodexToken $todayNoon.AddDays(-3) 9000 100 0 100)
+  )
+  [System.IO.File]::WriteAllText($rollout,(($codexLines -join "`n") + "`n"),$utf8)
+  # A forked session copies an earlier event into another file.
+  [System.IO.File]::WriteAllText((Join-Path $codexSessions 'rollout-fork.jsonl'),((CodexToken $todayNoon 1500 1000 600 500) + "`n"),$utf8)
+  $codexCache = Join-Path $data 'codex-local-personal.json'
+  $codex = $reader::ScanCodex((Join-Path $temp 'codex-home\sessions'),$codexCache,$today)
+  Assert-Claude ($codex['today']['messages'] -eq 2) 'Codex: repeated and forked token_count events count once; null info is ignored.'
+  Assert-Claude ($codex['today']['inputTokens'] -eq (400 + 2000) -and $codex['today']['cacheReadTokens'] -eq 600) 'Codex: cached input is split out of input.'
+  Assert-Claude ($codex['today']['totalTokens'] -eq (1000 + 500 + 2000 + 200)) 'Codex: totals are input plus output (reasoning is part of output).'
+  Assert-Claude ($codex['week']['messages'] -eq 3) 'Codex: seven-day window.'
+  $codexCost = [CodexUsageDesktop.ClaudeReader]::Cost('gpt-5.5',400,500,0,600) + [CodexUsageDesktop.ClaudeReader]::Cost('gpt-5.4',2000,200,0,0)
+  Assert-Claude ([Math]::Abs($codex['today']['costUsd'] - $codexCost) -lt 0.0000001) 'Codex: the model from turn_context prices each call.'
+  Assert-Claude ($codex['topModelToday'] -eq 'GPT-5.4') 'Codex: top model today by tokens.'
+  Assert-Claude ((($reader::Price('gpt-5.5'))[0] -eq 5) -and (($reader::Price('gpt-5.5'))[3] -eq 0.5) -and (($reader::Price('gpt-5.4'))[1] -eq 15)) 'OpenAI list prices.'
+  $codexCacheText = [System.IO.File]::ReadAllText($codexCache)
+  Assert-Claude (-not $codexCacheText.Contains('secret-project')) 'Codex cache keeps counts only, not working directories.'
+  [System.IO.File]::AppendAllText($rollout,((CodexToken $todayNoon.AddMinutes(2) 3800 50 0 50) + "`n"),$utf8)
+  $codex = $reader::ScanCodex((Join-Path $temp 'codex-home\sessions'),$codexCache,$today)
+  Assert-Claude ($codex['today']['messages'] -eq 3 -and $codex['topModelToday'] -eq 'GPT-5.4') 'Codex: incremental reads keep the model and duplicate state from the cache.'
+
   # ---- profile: quota + cache + failures
   $profile = New-Object 'System.Collections.Generic.Dictionary[string,object]'
   $profile['id'] = 'claude'; $profile['label'] = 'Claude'; $profile['claudeHome'] = $home1

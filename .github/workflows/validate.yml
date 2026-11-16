@@ -101,6 +101,8 @@ jobs:
             exists=true
           fi
           cat > release-notes.md <<'NOTES'
+          v1.1.0：新增额度耗尽预测（按当前速度预计何时用完，紧凑条提前变色，可选提前通知）、Codex 本机 token 用量与费用估算、各账号近 7 天用量趋势小图；手机端同步显示 Codex 本机用量。
+
           v1.0.0 新增 Claude：在两个 Codex 账号之外增加一个 Claude 账号，显示 Claude 订阅的 5 小时与每周剩余额度和重置倒计时，以及本机 Claude Code 今日 / 近 7 天 token 用量与 API 等价费用估算。没有订阅登录时仍显示本机用量。Claude 登录信息只读，不缓存、不上传、不刷新令牌。升级后若本机已在使用 Claude Code，会自动显示 Claude 账号；也可在“账号与首次使用”中开启。手机 PWA 同步显示 Claude 卡片。
 
           Windows 10/11 desktop client. Download **CodexUsage.exe** and double-click it. Confirm “安装并启动” on first launch. Installation is per-user and creates shortcuts; no administrator access is needed. Windows Settings → Apps now includes an uninstall entry that preserves settings and account data.

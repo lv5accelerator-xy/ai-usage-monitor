@@ -204,8 +204,9 @@ function Get-LocalUsageSummary {
 }
 
 function Get-LocalUsageDetail {
-  param($Usage)
-  if ($null -eq $Usage -or $null -eq $Usage.today) { return '尚未在本机找到最近 7 天的 Claude Code 会话记录。' }
+  param($Usage,[string]$Provider = 'claude')
+  $tool = if ($Provider -eq 'codex') { 'Codex' } else { 'Claude Code' }
+  if ($null -eq $Usage -or $null -eq $Usage.today) { return ('尚未在本机找到最近 7 天的 ' + $tool + ' 会话记录。') }
   $t = $Usage.today
   $lines = @(
     ('今日：输入 {0} · 输出 {1} · 缓存写入 {2} · 缓存读取 {3}' -f (Format-TokenCount $t.inputTokens),(Format-TokenCount $t.outputTokens),(Format-TokenCount $t.cacheWriteTokens),(Format-TokenCount $t.cacheReadTokens)),
@@ -215,6 +216,144 @@ function Get-LocalUsageDetail {
     if ($null -eq $day) { continue }
     $lines += ('{0}　{1} tokens · ≈{2}' -f [string]$day.date,(Format-TokenCount $day.totalTokens),(Format-Usd $day.costUsd))
   }
-  $lines += '费用按 Anthropic API 公开价格估算；订阅用户不按 token 计费。'
+  $lines += $(if ($Provider -eq 'codex') { '费用按 OpenAI API 公开价格估算；ChatGPT 订阅不按 token 计费。' } else { '费用按 Anthropic API 公开价格估算；订阅用户不按 token 计费。' })
   return ($lines -join "`r`n")
+}
+
+# Seven daily totals plus captions (weekday, "今" for today) for the trend chart.
+function Get-UsageTrend {
+  param($Usage,[DateTime]$Today = [DateTime]::Today)
+  $names = @('日','一','二','三','四','五','六')
+  $values = New-Object 'System.Collections.Generic.List[double]'
+  $labels = New-Object 'System.Collections.Generic.List[string]'
+  $highlight = -1
+  $byDate = @{}
+  foreach ($day in @($Usage.days)) { if ($null -ne $day -and $null -ne $day.date) { $byDate[[string]$day.date] = $day } }
+  for ($i = 6; $i -ge 0; $i--) {
+    $date = $Today.AddDays(-$i)
+    $key = $date.ToString('yyyy-MM-dd',[System.Globalization.CultureInfo]::InvariantCulture)
+    $tokens = 0.0
+    if ($byDate.ContainsKey($key)) { try { $tokens = [double]$byDate[$key].totalTokens } catch { $tokens = 0.0 } }
+    $values.Add($tokens)
+    if ($i -eq 0) { $labels.Add('今'); $highlight = $values.Count - 1 } else { $labels.Add($names[[int]$date.DayOfWeek]) }
+  }
+  return [pscustomobject]@{ values = $values.ToArray(); labels = $labels.ToArray(); highlight = $highlight }
+}
+
+# ---- Burn-rate forecast (v1.1). Samples come only from fresh successful reads.
+# History: hashtable "id|fiveHour" -> ArrayList of @{ t = unix seconds; r = remaining %; reset = unix seconds or $null }.
+function ConvertTo-UnixSeconds {
+  param($Value)
+  if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $null }
+  try {
+    $parsed = if ($Value -is [DateTimeOffset]) { $Value } elseif ($Value -is [DateTime]) { [DateTimeOffset]$Value } else { [DateTimeOffset]::Parse([string]$Value,[System.Globalization.CultureInfo]::InvariantCulture) }
+    return [double]$parsed.ToUnixTimeSeconds()
+  } catch { return $null }
+}
+
+function Add-UsageSamples {
+  param([hashtable]$History,$Data,[DateTimeOffset]$Now = [DateTimeOffset]::Now)
+  if ($null -eq $History -or $null -eq $Data) { return }
+  $nowT = [double]$Now.ToUnixTimeSeconds()
+  foreach ($profile in @($Data.profiles)) {
+    if ($null -eq $profile -or -not $profile.ok -or $profile.pending) { continue }
+    $t = ConvertTo-UnixSeconds $profile.fetchedAt
+    if ($null -eq $t -or $t -gt $nowT + 60) { continue }
+    foreach ($kind in @('fiveHour','weekly')) {
+      $window = $profile.$kind
+      if ($null -eq $window -or $null -eq $window.remainingPercent) { continue }
+      try { $remaining = [double]$window.remainingPercent } catch { continue }
+      if ([double]::IsNaN($remaining) -or $remaining -lt 0 -or $remaining -gt 100) { continue }
+      $key = [string]$profile.id + '|' + $kind
+      if (-not $History.ContainsKey($key)) { $History[$key] = New-Object System.Collections.ArrayList }
+      $list = $History[$key]
+      # Cached reads repeat their timestamp; keep at most one sample per ~50 s.
+      if ($list.Count -gt 0 -and $t -lt [double]$list[$list.Count - 1].t + 50) { continue }
+      [void]$list.Add([pscustomobject]@{ t = $t; r = $remaining; reset = (ConvertTo-UnixSeconds $window.resetsAt) })
+      $horizon = $nowT - 13 * 3600
+      while ($list.Count -gt 0 -and ([double]$list[0].t -lt $horizon -or $list.Count -gt 900)) { $list.RemoveAt(0) }
+    }
+  }
+}
+
+function Format-ForecastTime {
+  param([DateTimeOffset]$At,[DateTimeOffset]$Now = [DateTimeOffset]::Now)
+  $local = $At.ToLocalTime()
+  if ($local.Date -eq $Now.ToLocalTime().Date) { return $local.ToString('HH:mm') }
+  if ($local.Date -eq $Now.ToLocalTime().Date.AddDays(1)) { return ('明天 ' + $local.ToString('HH:mm')) }
+  return $local.ToString('MM-dd HH:mm')
+}
+
+# Least-squares slope over recent samples in the current reset cycle.
+# state: none (not enough data) | idle (not consuming) | safe (lasts until reset) | exhaust | empty
+function Get-BurnForecast {
+  param([hashtable]$History,[string]$Id,[string]$Kind,$Window,[DateTimeOffset]$Now = [DateTimeOffset]::Now)
+  $none = [pscustomobject]@{ state = 'none'; exhaustAt = $null; ratePerHour = $null; minutesLeft = $null; text = '' }
+  if ($null -eq $History -or $null -eq $Window -or $null -eq $Window.remainingPercent) { return $none }
+  try { $current = [double]$Window.remainingPercent } catch { return $none }
+  if ($current -le 0) { $none.state = 'empty'; return $none }
+  $list = $History[($Id + '|' + $Kind)]
+  if ($null -eq $list -or $list.Count -lt 2) { return $none }
+  $nowT = [double]$Now.ToUnixTimeSeconds()
+  $lookback = if ($Kind -eq 'fiveHour') { 60 * 60 } else { 12 * 3600 }
+  $minSpan = if ($Kind -eq 'fiveHour') { 10 * 60 } else { 2 * 3600 }
+  $reset = ConvertTo-UnixSeconds $Window.resetsAt
+  # Walk back from the newest sample; stop at a reset (remaining jumped up) or another cycle.
+  $points = New-Object System.Collections.ArrayList
+  for ($i = $list.Count - 1; $i -ge 0; $i--) {
+    $sample = $list[$i]
+    if ([double]$sample.t -lt $nowT - $lookback) { break }
+    if ($null -ne $reset -and $null -ne $sample.reset -and [Math]::Abs([double]$sample.reset - $reset) -gt 600) { break }
+    if ($points.Count -gt 0 -and [double]$sample.r -lt [double]$points[$points.Count - 1].r - 0.5) { break }
+    [void]$points.Add($sample)
+  }
+  if ($points.Count -lt 2) { return $none }
+  $first = [double]$points[$points.Count - 1].t
+  $span = [double]$points[0].t - $first
+  if ($span -lt $minSpan) { return $none }
+  $n = $points.Count; $sx = 0.0; $sy = 0.0; $sxx = 0.0; $sxy = 0.0
+  foreach ($p in $points) { $x = ([double]$p.t - $first) / 3600.0; $y = [double]$p.r; $sx += $x; $sy += $y; $sxx += $x * $x; $sxy += $x * $y }
+  $den = $n * $sxx - $sx * $sx
+  if ([Math]::Abs($den) -lt 1e-9) { return $none }
+  $slope = ($n * $sxy - $sx * $sy) / $den
+  $rate = -$slope
+  if ($rate -lt 0.2) { return [pscustomobject]@{ state = 'idle'; exhaustAt = $null; ratePerHour = [Math]::Max(0,$rate); minutesLeft = $null; text = '近期消耗很少' } }
+  $minutes = $current / $rate * 60
+  $at = $Now.AddMinutes($minutes)
+  if ($null -ne $reset -and $at.ToUnixTimeSeconds() -ge $reset) {
+    return [pscustomobject]@{ state = 'safe'; exhaustAt = $at; ratePerHour = $rate; minutesLeft = $minutes; text = '按当前速度可用到重置' }
+  }
+  return [pscustomobject]@{ state = 'exhaust'; exhaustAt = $at; ratePerHour = $rate; minutesLeft = $minutes; text = ('预计 ' + (Format-ForecastTime $at $Now) + ' 用完') }
+}
+
+function Get-ForecastDetail {
+  param($Forecast)
+  if ($null -eq $Forecast -or $Forecast.state -in @('none','empty')) { return '消耗预测：数据不足（需要约 10 分钟的连续读数）' }
+  $rate = ('{0:0.#}%/小时' -f [double]$Forecast.ratePerHour)
+  if ($Forecast.state -eq 'idle') { return ('消耗预测：近期几乎未消耗（' + $rate + '）') }
+  if ($Forecast.state -eq 'safe') { return ('消耗预测：约 ' + $rate + '，按当前速度可用到重置') }
+  return ('消耗预测：约 ' + $rate + '，' + $Forecast.text)
+}
+
+function ConvertTo-HistoryJson {
+  param([hashtable]$History)
+  $plain = [ordered]@{}
+  foreach ($key in $History.Keys) { $plain[$key] = @($History[$key] | ForEach-Object { [ordered]@{ t = $_.t; r = $_.r; reset = $_.reset } }) }
+  return ($plain | ConvertTo-Json -Depth 5 -Compress)
+}
+
+function ConvertFrom-HistoryJson {
+  param([string]$Json)
+  $history = @{}
+  if ([string]::IsNullOrWhiteSpace($Json)) { return $history }
+  $parsed = $Json | ConvertFrom-Json
+  foreach ($property in $parsed.PSObject.Properties) {
+    $list = New-Object System.Collections.ArrayList
+    foreach ($s in @($property.Value)) {
+      if ($null -eq $s -or $null -eq $s.t -or $null -eq $s.r) { continue }
+      [void]$list.Add([pscustomobject]@{ t = [double]$s.t; r = [double]$s.r; reset = $(if ($null -eq $s.reset) { $null } else { [double]$s.reset }) })
+    }
+    $history[$property.Name] = $list
+  }
+  return $history
 }

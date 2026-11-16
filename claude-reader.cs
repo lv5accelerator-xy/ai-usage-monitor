@@ -193,9 +193,31 @@ namespace CodexUsageDesktop {
 
         // USD per million tokens: input, output, cache write (5 min), cache read.
         // Estimates at public API list prices; subscription users are not billed per token.
+        public static bool IsOpenAiModel(string model) {
+            string m = (model ?? "").ToLowerInvariant();
+            return m.StartsWith("gpt") || m.Contains("codex") || Regex.IsMatch(m, @"^o\d");
+        }
+
+        // OpenAI list prices (input, output, n/a cache write, cached input) for Codex sessions.
+        static double[] OpenAiPrice(string m) {
+            if (Regex.IsMatch(m, @"5[.-]5")) return m.Contains("pro") ? new double[] { 30, 180, 30, 30 } : new double[] { 5, 30, 5, 0.5 };
+            if (Regex.IsMatch(m, @"5[.-]4")) {
+                if (m.Contains("nano")) return new double[] { 0.2, 1.25, 0.2, 0.02 };
+                if (m.Contains("mini")) return new double[] { 0.75, 4.5, 0.75, 0.075 };
+                return new double[] { 2.5, 15, 2.5, 0.25 };
+            }
+            if (Regex.IsMatch(m, @"5[.-][23]")) return new double[] { 1.75, 14, 1.75, 0.175 };
+            if (m.StartsWith("o3")) return new double[] { 2, 8, 2, 0.5 };
+            if (m.StartsWith("o4")) return new double[] { 1.1, 4.4, 1.1, 0.275 };
+            if (m.Contains("nano")) return new double[] { 0.05, 0.4, 0.05, 0.005 };
+            if (m.Contains("mini")) return new double[] { 0.25, 2, 0.25, 0.025 };
+            return new double[] { 1.25, 10, 1.25, 0.125 };
+        }
+
         public static double[] Price(string model) {
             string m = (model ?? "").ToLowerInvariant();
             if (m.Length == 0 || m.Contains("synthetic")) return new double[] { 0, 0, 0, 0 };
+            if (IsOpenAiModel(m)) return OpenAiPrice(m);
             int major = 0, minor = 0;
             Match version = Regex.Match(m, @"(opus|sonnet|haiku|fable|mythos)-(\d{1,2})(?:-(\d))?(?=-|$)");
             if (version.Success) {
@@ -236,6 +258,7 @@ namespace CodexUsageDesktop {
         }
 
         public static string ShortModel(string model) {
+            if (IsOpenAiModel(model)) { string t = model.Trim(); return t.StartsWith("gpt", StringComparison.OrdinalIgnoreCase) ? "GPT" + t.Substring(3) : t; }
             Match match = Regex.Match((model ?? "").ToLowerInvariant(), @"(opus|sonnet|haiku|fable|mythos)(?:-(\d{1,2})(?:-(\d))?(?=-|$))?");
             if (!match.Success) return string.IsNullOrWhiteSpace(model) ? "" : model;
             string name = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(match.Groups[1].Value);
@@ -246,6 +269,8 @@ namespace CodexUsageDesktop {
         // ---------------------------------------------------------------- local logs
 
         sealed class Entry { public string Key, Day, Model; public long Input, Output, CacheWrite, CacheRead; }
+        // Per-file parser state that must survive incremental reads (Codex only).
+        sealed class FileState { public string Model = ""; public long LastTotal = -1; }
 
         static string LocalDay(string timestamp) {
             DateTimeOffset parsed;
@@ -253,7 +278,44 @@ namespace CodexUsageDesktop {
             return parsed.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         }
 
-        static Entry ParseLine(string line, string fallbackKey) {
+        static Entry ParseLine(string line, string fallbackKey, FileState state, bool codex) {
+            return codex ? ParseCodexLine(line, fallbackKey, state) : ParseClaudeLine(line, fallbackKey);
+        }
+
+        // Codex rollout: event_msg/token_count carries per-turn last_token_usage plus a
+        // cumulative total. Repeated events with an unchanged total are skipped; the
+        // model comes from the latest turn_context. cached_input is a subset of input
+        // and reasoning output is a subset of output.
+        static Entry ParseCodexLine(string line, string fallbackKey, FileState state) {
+            bool context = line.IndexOf("\"turn_context\"", StringComparison.Ordinal) >= 0;
+            if (!context && line.IndexOf("\"token_count\"", StringComparison.Ordinal) < 0) return null;
+            object record;
+            try { record = Json().DeserializeObject(line); } catch (ArgumentException) { return null; } catch (InvalidOperationException) { return null; }
+            object payload = Get(record, "payload");
+            string type = Text(Get(record, "type"));
+            if (type == "turn_context") {
+                string model = Text(Get(payload, "model"));
+                if (model.Length > 0) state.Model = model;
+                return null;
+            }
+            if (type != "event_msg" || Text(Get(payload, "type")) != "token_count") return null;
+            object info = Get(payload, "info");
+            object last = Get(info, "last_token_usage");
+            if (last == null) return null;
+            long total = Count(Get(Get(info, "total_token_usage"), "total_tokens"));
+            if (total > 0 && total == state.LastTotal) return null;
+            if (total > 0) state.LastTotal = total;
+            long input = Count(Get(last, "input_tokens")), cached = Math.Min(input, Count(Get(last, "cached_input_tokens"))), output = Count(Get(last, "output_tokens"));
+            string timestamp = Text(Get(record, "timestamp"));
+            var entry = new Entry { Model = state.Model.Length > 0 ? state.Model : "codex", Input = input - cached, CacheRead = cached, Output = output, Day = LocalDay(timestamp) };
+            if (entry.Day == null || input + output == 0) return null;
+            // Forked sessions can copy earlier events into another file; the same
+            // timestamp and counters identify the same model call across files.
+            entry.Key = timestamp.Length > 0 ? "codex:" + timestamp + ":" + total + ":" + Count(Get(last, "total_tokens")) : fallbackKey;
+            return entry;
+        }
+
+        static Entry ParseClaudeLine(string line, string fallbackKey) {
             if (line.IndexOf("\"usage\"", StringComparison.Ordinal) < 0 || line.IndexOf("\"assistant\"", StringComparison.Ordinal) < 0) return null;
             object record;
             try { record = Json().DeserializeObject(line); } catch (ArgumentException) { return null; } catch (InvalidOperationException) { return null; }
@@ -285,7 +347,7 @@ namespace CodexUsageDesktop {
         }
 
         // Reads complete lines appended after offset. Returns the new offset.
-        static long ReadAppended(string path, long offset, string cutoffDay, List<Entry> output) {
+        static long ReadAppended(string path, long offset, string cutoffDay, List<Entry> output, FileState state, bool codex) {
             using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
                 if (offset > stream.Length) offset = 0;
                 stream.Seek(offset, SeekOrigin.Begin);
@@ -303,7 +365,7 @@ namespace CodexUsageDesktop {
                         start = i + 1;
                         if (line.Length > 0 && line.Length < 32 * 1024 * 1024) {
                             string text = Encoding.UTF8.GetString(line.GetBuffer(), 0, (int)line.Length);
-                            Entry entry = ParseLine(text, path + "#" + lineStart);
+                            Entry entry = ParseLine(text, path + "#" + lineStart, state, codex);
                             if (entry != null && string.CompareOrdinal(entry.Day, cutoffDay) >= 0) output.Add(entry);
                         }
                         line.SetLength(0);
@@ -330,6 +392,15 @@ namespace CodexUsageDesktop {
         }
 
         public static Dictionary<string, object> ScanLocal(string projectsDir, string cachePath, DateTime today) {
+            return ScanFiles(projectsDir, cachePath, today, false);
+        }
+
+        // Codex rollout logs live under <CODEX_HOME>/sessions/YYYY/MM/DD/rollout-*.jsonl.
+        public static Dictionary<string, object> ScanCodex(string sessionsDir, string cachePath, DateTime today) {
+            return ScanFiles(sessionsDir, cachePath, today, true);
+        }
+
+        static Dictionary<string, object> ScanFiles(string projectsDir, string cachePath, DateTime today, bool codex) {
             string todayKey = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             string cutoffDay = today.AddDays(-(LocalDays - 1)).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             DateTime cutoffWrite = today.AddDays(-(LocalDays + 1)).ToUniversalTime();
@@ -337,7 +408,7 @@ namespace CodexUsageDesktop {
             if (!string.IsNullOrEmpty(cachePath) && File.Exists(cachePath)) {
                 try {
                     object cache = Json().DeserializeObject(File.ReadAllText(cachePath, Encoding.UTF8));
-                    if (Text(Get(cache, "projects")) == projectsDir && Number(Get(cache, "version")) == 1)
+                    if (Text(Get(cache, "projects")) == projectsDir && Number(Get(cache, "version")) == 1 && Text(Get(cache, "kind")) == (codex ? "codex" : "claude"))
                         foreach (var pair in Map(Get(cache, "files"))) cachedFiles[pair.Key] = pair.Value;
                 } catch (Exception) { cachedFiles.Clear(); }
             }
@@ -356,24 +427,28 @@ namespace CodexUsageDesktop {
                         object previous;
                         cachedFiles.TryGetValue(file, out previous);
                         var entries = new List<Entry>();
+                        var state = new FileState();
                         long offset = 0;
                         if (previous != null && Count(Get(previous, "length")) <= info.Length) {
                             offset = Count(Get(previous, "offset"));
+                            state.Model = Text(Get(previous, "model"));
+                            double? lastTotal = Number(Get(previous, "lastTotal"));
+                            state.LastTotal = lastTotal.HasValue ? (long)lastTotal.Value : -1;
                             var old = Get(previous, "entries") as IEnumerable;
                             if (old != null) foreach (object raw in old) { Entry e = Unpack(raw); if (e != null && string.CompareOrdinal(e.Day, cutoffDay) >= 0) entries.Add(e); }
                         }
                         if (previous == null || Count(Get(previous, "length")) != info.Length || Text(Get(previous, "mtime")) != info.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture))
-                            offset = ReadAppended(file, offset, cutoffDay, entries);
+                            offset = ReadAppended(file, offset, cutoffDay, entries, state, codex);
                         all.AddRange(entries);
                         nextFiles[file] = new Dictionary<string, object> {
-                            { "length", info.Length }, { "mtime", info.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture) }, { "offset", offset },
+                            { "length", info.Length }, { "mtime", info.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture) }, { "offset", offset }, { "model", state.Model }, { "lastTotal", state.LastTotal },
                             { "entries", entries.Select(e => (object)Pack(e)).ToArray() }
                         };
                     } catch (IOException) { } catch (UnauthorizedAccessException) { }
                 }
             }
             if (!string.IsNullOrEmpty(cachePath)) {
-                try { AtomicWrite(cachePath, Json().Serialize(new Dictionary<string, object> { { "version", 1 }, { "projects", projectsDir }, { "files", nextFiles } })); }
+                try { AtomicWrite(cachePath, Json().Serialize(new Dictionary<string, object> { { "version", 1 }, { "kind", codex ? "codex" : "claude" }, { "projects", projectsDir }, { "files", nextFiles } })); }
                 catch (Exception) { }
             }
             var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -382,7 +457,8 @@ namespace CodexUsageDesktop {
             var days = new SortedDictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
             for (int i = LocalDays - 1; i >= 0; i--) days[today.AddDays(-i).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)] = Totals();
             var models = new Dictionary<string, double>();
-            foreach (Entry e in all.OrderBy(e => e.Day, StringComparer.Ordinal)) {
+            // When duplicates exist, keep the copy whose model is known (forks may lack turn_context).
+            foreach (Entry e in all.OrderBy(e => e.Day, StringComparer.Ordinal).ThenBy(e => e.Model == "codex" || e.Model.Length == 0 ? 1 : 0)) {
                 if (!seen.Add(e.Key) || !days.ContainsKey(e.Day)) continue;
                 double cost = Cost(e.Model, e.Input, e.Output, e.CacheWrite, e.CacheRead);
                 Add(weekTotals, e, cost);

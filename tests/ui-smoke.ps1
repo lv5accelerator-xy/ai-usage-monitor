@@ -389,7 +389,13 @@ $claudeProfile = [pscustomobject]@{
     days = @([pscustomobject]@{ date = '2026-11-16'; totalTokens = 1206000; costUsd = 1.23 }); topModelToday = 'Opus 5.5'
   }
 }
-$claudeSample = [pscustomobject]@{ fetchedAt = $fixtureTime; profiles = @($sample.profiles[0],$sample.profiles[1],$claudeProfile) }
+$personalLocal = $sample.profiles[0] | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+$personalLocal | Add-Member -NotePropertyName localUsage -NotePropertyValue ([pscustomobject]@{
+  today = [pscustomobject]@{ inputTokens = 5000; outputTokens = 900; cacheWriteTokens = 0; cacheReadTokens = 40000; totalTokens = 45900; costUsd = 0.08; messages = 12 }
+  week = [pscustomobject]@{ totalTokens = 300000; costUsd = 0.6; messages = 80 }
+  days = @([pscustomobject]@{ date = [DateTime]::Today.AddDays(-1).ToString('yyyy-MM-dd'); totalTokens = 90000; costUsd = 0.2 },[pscustomobject]@{ date = [DateTime]::Today.ToString('yyyy-MM-dd'); totalTokens = 45900; costUsd = 0.08 })
+  topModelToday = 'GPT-5.5' }) -Force
+$claudeSample = [pscustomobject]@{ fetchedAt = $fixtureTime; profiles = @($personalLocal,$sample.profiles[1],$claudeProfile) }
 $script:ProfileConfig.profiles[2].enabled = $true
 Apply-ProfileLayout
 Set-MonitorExpanded $false
@@ -407,6 +413,28 @@ $claudeTexts = @(Get-ControlTree $claudeCard | ForEach-Object { [string]$_.Text 
 Assert-Ui (@($claudeTexts | Where-Object { $_ -match '本机 Claude Code 用量' -and $_ -match '1\.2M' }).Count -eq 1) 'Claude card shows local token usage.'
 Assert-Ui (@($claudeTexts | Where-Object { $_ -eq 'Claude · Max 5x' }).Count -eq 1) 'Claude card identifies the provider and plan.'
 Assert-Ui (@($claudeTexts | Where-Object { $_ -eq 'Sonnet 每周 · 剩余' }).Count -eq 1) 'Model-specific weekly quota gets its own row.'
+$codexCardTree = @(Get-ControlTree $script:ContentPanel.Controls[0])
+Assert-Ui (@($codexCardTree | Where-Object { [string]$_.Text -match '本机 Codex 用量' -and [string]$_.Text -match '45\.9K' }).Count -eq 1) 'Codex card shows local Codex usage.'
+$codexChart = @($codexCardTree | Where-Object { $_ -is [CodexUsage.UsageSparkline] })
+Assert-Ui ($codexChart.Count -eq 1 -and $codexChart[0].Values.Length -eq 7 -and $codexChart[0].HighlightIndex -eq 6 -and $codexChart[0].Values[6] -eq 45900 -and $codexChart[0].Labels[6] -eq '今') 'Codex card has a seven-day trend ending today.'
+Assert-Ui (@(Get-ControlTree $claudeCard | Where-Object { $_ -is [CodexUsage.UsageSparkline] }).Count -eq 1) 'Claude card has a trend chart.'
+Assert-Ui (@(Get-ControlTree $script:ContentPanel.Controls[1] | Where-Object { $_ -is [CodexUsage.UsageSparkline] }).Count -eq 0) 'Accounts without local logs show no empty chart.'
+# Burn-rate forecast: work 5h falls 30%/h with 49% left and reset in 2 h -> runs out first.
+$script:UsageHistory = @{}
+for ($m = 20; $m -ge 0; $m--) {
+  Add-UsageSamples -History $script:UsageHistory -Data ([pscustomobject]@{ profiles = @([pscustomobject]@{ id = 'work'; ok = $true; fetchedAt = [DateTimeOffset]::Now.AddMinutes(-$m).ToString('o'); fiveHour = [pscustomobject]@{ remainingPercent = (49 + $m * 0.5); resetsAt = $resetTime }; weekly = $null }) }) -Now ([DateTimeOffset]::Now)
+}
+Update-Status
+$workFive = @($script:ResetLabels | Where-Object { $_.Tag.kind -eq 'fiveHour' -and [string]$_.Tag.profile.id -eq 'work' })
+Assert-Ui ($workFive.Count -eq 1 -and $workFive[0].Text -match '用完' -and $workFive[0].ForeColor -eq $script:Theme.Warning) 'Card reset line shows the exhaustion forecast.'
+Assert-Ui ($script:ToolTip.GetToolTip($workFive[0]) -match '%/小时') 'Forecast tooltip shows the burn rate.'
+$personalFive = @($script:ResetLabels | Where-Object { $_.Tag.kind -eq 'fiveHour' -and [string]$_.Tag.profile.id -eq 'personal' })
+Assert-Ui ($personalFive[0].Text -notmatch '用完') 'Accounts without history show no forecast.'
+Update-BallSummary $script:LastData
+Assert-Ui ($script:CompactRecovery.work.Text -match '^5h 预计 .* 用完$') 'Compact strip warns before the 5h quota runs out.'
+Assert-Ui ($script:ToolTip.GetToolTip($script:BallCells.work.five) -match '消耗预测') 'Summary tooltip includes the forecast.'
+$script:UsageHistory = @{}
+Update-Status
 foreach ($width in @(620,380)) {
   $script:Popup.Width = U $width
   [System.Windows.Forms.Application]::DoEvents()

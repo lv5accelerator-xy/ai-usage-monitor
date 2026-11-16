@@ -2,7 +2,13 @@
 
 Windows desktop quota monitor for two ChatGPT/Codex accounts (Personal + Work) and one Claude account.
 
-Current version: **v1.0.0**
+Current version: **v1.1.0**
+
+## v1.1.0: forecasts and trends
+
+- **Burn-rate forecast.** Each 5-hour and weekly quota estimates when it will run out at the current pace ("预计 15:40 用完") or confirms it lasts until reset. The compact strip turns amber before you run out, and an optional notification warns 30 minutes (5h) or 24 hours (weekly) ahead. Forecasts start after ~10 minutes (5h) / ~2 hours (weekly) of readings.
+- **Codex local usage.** Today / seven-day tokens, requests, main model and an OpenAI list-price estimate from Codex's local session logs, alongside the existing Claude statistics.
+- **Seven-day trend.** A small bar chart on each card; hover for the daily breakdown.
 
 ## v1.0.0: Codex and Claude in one monitor
 

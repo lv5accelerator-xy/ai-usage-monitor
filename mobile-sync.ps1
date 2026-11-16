@@ -1,4 +1,4 @@
-# Mobile snapshot shaping and local queue helpers. No network access occurs in this file.
+﻿# Mobile snapshot shaping and local queue helpers. No network access occurs in this file.
 
 function Write-AtomicUtf8Json {
   param([Parameter(Mandatory = $true)][string]$Path,[Parameter(Mandatory = $true)]$Value,[int]$Depth = 12)
@@ -87,8 +87,8 @@ function New-MobileUsageSnapshot {
       fiveHour = ConvertTo-MobileWindow $profile.fiveHour '5h' '5 Hours'
       longTerm = Get-MobileLongTermWindow $profile
     }
-    # Claude adds only aggregate token counts and estimated cost; never paths, models' prompts or ids.
-    if ($id -eq 'claude') { $entry['localUsage'] = ConvertTo-MobileLocalUsage $profile.localUsage }
+    # Local usage adds only aggregate token counts and estimated cost; never paths, models, prompts or ids.
+    $entry['localUsage'] = ConvertTo-MobileLocalUsage $profile.localUsage
     $profiles += $entry
   }
   return [ordered]@{

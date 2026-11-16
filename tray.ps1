@@ -44,6 +44,9 @@ $script:UiScale = 1.0
 $script:AlertState = @{}
 $script:AlertBaselinePending = $true
 $script:AlertStatePath = Join-Path $script:LogDir 'notification-state.json'
+$script:UsageHistory = @{}
+$script:UsageHistoryPath = Join-Path $script:LogDir 'usage-history.json'
+$script:ForecastAlerted = @{}
 $script:MonitorExpanded = $true
 $script:RestLocation = $null
 $script:PointerLeftAt = $null
@@ -471,6 +474,55 @@ try {
     } catch { Write-TrayLog ('Notification warning: ' + $_.Exception.Message) }
   }
 
+  function Load-UsageHistory {
+    if ($SmokeTest -or -not (Test-Path -LiteralPath $script:UsageHistoryPath)) { return }
+    try { $script:UsageHistory = ConvertFrom-HistoryJson ([System.IO.File]::ReadAllText($script:UsageHistoryPath)) }
+    catch { $script:UsageHistory = @{}; Write-TrayLog ('Usage history load warning: ' + $_.Exception.Message) }
+  }
+
+  # Fresh successful reads become forecast samples; the history stays local (percentages only).
+  function Update-UsageHistory {
+    param($Data)
+    try {
+      Add-UsageSamples -History $script:UsageHistory -Data $Data
+      if (-not $SmokeTest) {
+        $temporary = $script:UsageHistoryPath + '.tmp'
+        [System.IO.File]::WriteAllText($temporary,(ConvertTo-HistoryJson $script:UsageHistory),(New-Object System.Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $temporary -Destination $script:UsageHistoryPath -Force
+      }
+    } catch { Write-TrayLog ('Usage history warning: ' + $_.Exception.Message) }
+  }
+
+  function Get-ProfileForecast {
+    param($Profile,[string]$Kind)
+    if ($null -eq $Profile -or -not $Profile.ok) { return $null }
+    return Get-BurnForecast -History $script:UsageHistory -Id ([string]$Profile.id) -Kind $Kind -Window $Profile.$Kind
+  }
+
+  # Early warning: 5h quota about to run out within 30 minutes, weekly within 24 hours.
+  function Process-ForecastNotifications {
+    param($Data)
+    if (-not $script:UiSettings.notificationsEnabled) { return }
+    $lines = @()
+    foreach ($profile in @($Data.profiles)) {
+      if ($null -eq $profile -or (Test-ProfileStale $profile)) { continue }
+      foreach ($kind in @('fiveHour','weekly')) {
+        $forecast = Get-ProfileForecast $profile $kind
+        if ($null -eq $forecast -or $forecast.state -ne 'exhaust') { continue }
+        $limit = if ($kind -eq 'fiveHour') { 30 } else { 24 * 60 }
+        if ($forecast.minutesLeft -gt $limit) { continue }
+        $key = [string]$profile.id + '|' + $kind + '|' + [string]$profile.$kind.resetsAt
+        if ($script:ForecastAlerted.ContainsKey($key)) { continue }
+        $script:ForecastAlerted[$key] = $true
+        $title = if ($kind -eq 'fiveHour') { '5 小时额度' } else { '每周额度' }
+        $lines += ('{0} · {1}按当前速度{2}' -f (Get-AccountName ([string]$profile.id)),$title,$forecast.text)
+      }
+    }
+    if ($lines.Count -gt 0 -and -not $SmokeTest) {
+      $script:NotifyIcon.ShowBalloonTip(8000,'额度消耗预警',($lines -join "`r`n"),[System.Windows.Forms.ToolTipIcon]::Warning)
+    }
+  }
+
   # Convert delegates once; detach them before discarding a card tree.
   $script:CardLoginHandler = [System.EventHandler]{ param($sender,$e) Start-Login ([string]$sender.Tag) }
   $script:CardWheelHandler = [System.Windows.Forms.MouseEventHandler]{
@@ -496,7 +548,7 @@ try {
   }
 
   function Add-QuotaRow {
-    param($Parent,[string]$Title,$Window,[int]$Row,[switch]$Primary,[string]$Detail = '',$Accent = $null)
+    param($Parent,[string]$Title,$Window,[int]$Row,[switch]$Primary,[string]$Detail = '',$Accent = $null,$Profile = $null,[string]$Kind = '')
     $grid = New-Grid -Columns 2
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList ([System.Windows.Forms.SizeType]::Percent),([single]60)))
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList ([System.Windows.Forms.SizeType]::Percent),([single]40)))
@@ -519,7 +571,7 @@ try {
     $grid.Controls.Add($bar,0,1)
     $grid.SetColumnSpan($bar,2)
     $reset = New-Label -Size 9 -Muted
-    $reset.Tag = [pscustomobject]@{ window = $Window; detail = $Detail }
+    $reset.Tag = [pscustomobject]@{ window = $Window; detail = $Detail; profile = $Profile; kind = $Kind }
     $script:ResetLabels += $reset
     $grid.Controls.Add($reset,0,2)
     $grid.SetColumnSpan($reset,2)
@@ -527,13 +579,32 @@ try {
     $Parent.SetColumnSpan($grid,2)
   }
 
+  # Local usage block: one summary line plus a seven-day trend chart (58 + 46 logical px).
+  $script:LocalUsageBlockHeight = 104
   function Add-LocalUsageRow {
-    param($Parent,$Profile,[int]$Row)
+    param($Parent,$Profile,[int]$Row,$Accent)
+    $provider = if (Test-ClaudeProfile $Profile) { 'claude' } else { 'codex' }
+    $detail = Get-LocalUsageDetail $Profile.localUsage $provider
     Add-GridRow $Parent 58
-    $local = New-Label -Text ('本机 Claude Code 用量' + "`r`n" + (Get-LocalUsageSummary $Profile.localUsage)) -Size 9 -Muted
+    $title = if ($provider -eq 'codex') { '本机 Codex 用量' } else { '本机 Claude Code 用量' }
+    $local = New-Label -Text ($title + "`r`n" + (Get-LocalUsageSummary $Profile.localUsage)) -Size 9 -Muted
     $Parent.Controls.Add($local,0,$Row)
     $Parent.SetColumnSpan($local,2)
-    $script:ToolTip.SetToolTip($local,(Get-LocalUsageDetail $Profile.localUsage))
+    $script:ToolTip.SetToolTip($local,$detail)
+    Add-GridRow $Parent 46
+    $trend = Get-UsageTrend $Profile.localUsage
+    $chart = New-Object CodexUsage.UsageSparkline
+    $chart.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $chart.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 0,(U 4),0,(U 2)
+    $chart.BarColor = $Accent
+    $chart.TrackColor = $script:Theme.Track
+    $chart.CaptionColor = $script:Theme.Caption
+    $chart.HighlightIndex = $trend.highlight
+    $chart.SetData([double[]]$trend.values,[string[]]$trend.labels)
+    $chart.AccessibleName = $title + ' 近 7 天趋势'
+    $Parent.Controls.Add($chart,0,($Row + 1))
+    $Parent.SetColumnSpan($chart,2)
+    $script:ToolTip.SetToolTip($chart,$detail)
   }
 
   function Add-AccountCard {
@@ -556,10 +627,12 @@ try {
     if ($isClaude) {
       # Header 36 + footer 32 + padding; rows below are summed as they are added.
       $body = if (-not $Profile.ok) { 104 } elseif ($localOnly) { 60 } else { 100 + 82 + 82 * $extraWindows.Count }
-      if ($Profile.PSObject.Properties.Name -contains 'localUsage' -and ($Profile.ok -or $null -ne $Profile.localUsage)) { $body += 58 }
+      if ($Profile.PSObject.Properties.Name -contains 'localUsage' -and ($Profile.ok -or $null -ne $Profile.localUsage)) { $body += $script:LocalUsageBlockHeight }
       $card.Height = U (106 + $body)
     } else {
-      $card.Height = if (-not $Profile.ok) { U 206 } elseif ($hasMonthly) { U 366 } else { U 284 }
+      $codexHeight = if (-not $Profile.ok) { 206 } elseif ($hasMonthly) { 366 } else { 284 }
+      if ($Profile.ok -and $null -ne $Profile.localUsage) { $codexHeight += $script:LocalUsageBlockHeight }
+      $card.Height = U $codexHeight
     }
     $grid = New-Grid -Columns 2
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList ([System.Windows.Forms.SizeType]::Percent),([single]60)))
@@ -582,7 +655,7 @@ try {
       $row = 2
     } elseif ($Profile.ok) {
       Add-GridRow $grid 100
-      Add-QuotaRow $grid '5 小时 · 剩余' $Profile.fiveHour 1 -Primary -Accent $accent
+      Add-QuotaRow $grid '5 小时 · 剩余' $Profile.fiveHour 1 -Primary -Accent $accent -Profile $Profile -Kind 'fiveHour'
       $row = 2
       if ($hasMonthly) {
         Add-GridRow $grid 82
@@ -594,7 +667,7 @@ try {
         $row++
       }
       Add-GridRow $grid 82
-      Add-QuotaRow $grid $(if ($isClaude) { '每周 · 全部模型 · 剩余' } else { '每周 · 剩余' }) $Profile.weekly $row -Accent $accent
+      Add-QuotaRow $grid $(if ($isClaude) { '每周 · 全部模型 · 剩余' } else { '每周 · 剩余' }) $Profile.weekly $row -Accent $accent -Profile $Profile -Kind 'weekly'
       $row++
       foreach ($extra in $extraWindows) {
         Add-GridRow $grid 82
@@ -610,9 +683,10 @@ try {
       $script:ToolTip.SetToolTip($errorLabel,[string]$Profile.error)
       $row = 2
     }
-    if ($isClaude -and $Profile.PSObject.Properties.Name -contains 'localUsage' -and ($Profile.ok -or $null -ne $Profile.localUsage)) {
-      Add-LocalUsageRow $grid $Profile $row
-      $row++
+    $showLocal = if ($isClaude) { $Profile.PSObject.Properties.Name -contains 'localUsage' -and ($Profile.ok -or $null -ne $Profile.localUsage) } else { $Profile.ok -and $null -ne $Profile.localUsage }
+    if ($showLocal) {
+      Add-LocalUsageRow $grid $Profile $row $accent
+      $row += 2
     }
     Add-GridRow $grid 32
     $state = New-Label -Size 9 -Muted
@@ -684,11 +758,14 @@ try {
       foreach ($extra in @($profile.windows)) { if ($null -ne $extra -and [string]$extra.kind -like 'weekly-*') { $tip += "`r`n" + [string]$extra.label + '剩余：' + (Format-Percent $extra.remainingPercent) } }
       if (Test-ClaudeProfile $profile) {
         if (-not [string]::IsNullOrWhiteSpace([string]$profile.quotaError)) { $tip += "`r`n" + [string]$profile.quotaError }
-        if ($null -ne $profile.localUsage) { $tip += "`r`n" + (Get-LocalUsageSummary $profile.localUsage) }
       }
+      if ($null -ne $profile -and $null -ne $profile.localUsage) { $tip += "`r`n" + (Get-LocalUsageSummary $profile.localUsage) }
       if ($stale -and ($null -ne $Data -or -not [string]::IsNullOrEmpty($script:RefreshError))) { $tip += "`r`n数据未更新，请刷新后确认。" }
+      $fiveForecast = Get-ProfileForecast $profile 'fiveHour'
+      $longForecast = Get-ProfileForecast $profile 'weekly'
+      $tip += "`r`n" + (Get-ForecastDetail $longForecast).Replace('消耗预测','每周消耗预测')
       $script:ToolTip.SetToolTip($cells.long,$tip)
-      $script:ToolTip.SetToolTip($cells.five,'5 小时窗口剩余额度。' + "`r`n" + $updateText + "`r`n" + (Get-ResetText ([string]$profile.fiveHour.resetsAt)))
+      $script:ToolTip.SetToolTip($cells.five,'5 小时窗口剩余额度。' + "`r`n" + $updateText + "`r`n" + (Get-ResetText ([string]$profile.fiveHour.resetsAt)) + "`r`n" + (Get-ForecastDetail $fiveForecast))
       $script:ToolTip.SetToolTip($cells.name,($updateText + "`r`n" + [string]$profile.refreshError))
       foreach ($window in @('five','long')) {
         $ring = $script:RingCells[($id + '-' + $window)]
@@ -715,6 +792,11 @@ try {
         $recovery = $script:CompactRecovery[$id]
         $recovery.Text = Get-CompactRecovery $profile.fiveHour $stale
         $recovery.ForeColor = if ($null -ne $pair.fiveHour -and [double]$pair.fiveHour -eq 0 -and -not $stale) { $script:Theme.Warning } else { $script:Theme.TextMuted }
+        # Not exhausted yet: show the forecast when either window will run out before its reset.
+        if (-not $stale -and $null -ne $pair.fiveHour -and [double]$pair.fiveHour -gt 0) {
+          if ($null -ne $fiveForecast -and $fiveForecast.state -eq 'exhaust') { $recovery.Text = '5h ' + $fiveForecast.text; $recovery.ForeColor = $script:Theme.Warning }
+          elseif ($null -ne $longForecast -and $longForecast.state -eq 'exhaust') { $recovery.Text = '长周期 ' + $longForecast.text; $recovery.ForeColor = $script:Theme.Warning }
+        }
         $label.AccountName = $account + $(if ($stale -and $null -ne $Data) { ' !' } else { '' })
         $label.FiveText = Format-CompactPercent $pair.fiveHour
         $label.LongText = Format-CompactPercent $pair.longTerm
@@ -773,7 +855,14 @@ try {
       if ($null -eq $script:LastData -and [string]::IsNullOrEmpty($script:RefreshError)) { $label.Text = '等待读取…' }
       elseif ($null -eq $window -or $null -eq $window.remainingPercent) { $label.Text = '未提供此额度' }
       else { $label.Text = Get-ResetText ([string]$window.resetsAt) }
+      $label.ForeColor = $script:Theme.TextMuted
+      $forecast = if (-not [string]::IsNullOrEmpty($label.Tag.kind)) { Get-ProfileForecast $label.Tag.profile $label.Tag.kind } else { $null }
+      if ($null -ne $forecast -and $forecast.state -in @('exhaust','safe')) {
+        $label.Text += ' · ' + $forecast.text
+        if ($forecast.state -eq 'exhaust') { $label.ForeColor = $script:Theme.Warning }
+      }
       $tip = $label.Text
+      if (-not [string]::IsNullOrEmpty($label.Tag.kind)) { $tip += "`r`n" + (Get-ForecastDetail $forecast) }
       if (-not [string]::IsNullOrEmpty($label.Tag.detail)) { $tip = $label.Tag.detail + "`r`n" + $tip }
       try {
         if ($window.resetsAt) { $tip += "`r`n" + ([DateTimeOffset]::Parse($window.resetsAt)).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss zzz') }
@@ -896,7 +985,9 @@ try {
       if ($script:ReadRevision -ne $script:ProfileRevision) { Start-Refresh; return }
       $script:LastData = Merge-DisplayData -Previous $script:LastData -Incoming $payload.data
       $script:RefreshError = ''
+      Update-UsageHistory $payload.data
       Process-QuotaNotifications $payload.data
+      Process-ForecastNotifications $payload.data
       try { [void](Write-MobileUsagePending -Data $script:LastData -Settings $script:RemoteSettings -Path $script:MobileUsagePendingPath) }
       catch { Write-TrayLog ('Mobile snapshot queue warning: ' + $_.Exception.Message) }
       Render-Data $script:LastData
@@ -916,6 +1007,7 @@ try {
       if (@($payload.data.profiles).Count -eq 0) { return }
       $script:LastProgressRevision = [int]$payload.revision
       $script:LastData = Merge-DisplayData -Previous $script:LastData -Incoming $payload.data
+      Update-UsageHistory $payload.data
       $script:RefreshError = ''
       Render-Data $script:LastData
       try { [void](Write-MobileUsagePending -Data $script:LastData -Settings $script:RemoteSettings -Path $script:MobileUsagePendingPath) }
@@ -1011,6 +1103,7 @@ try {
   $script:UiSettings = Load-UiSettings
   Load-ProfilePreferences
   Load-AlertState
+  Load-UsageHistory
   Initialize-RemoteNotifications
   $script:Popup = New-Object CodexUsage.DpiForm
   $script:Popup.DisplayDpi = [int]($script:UiScale * 96)

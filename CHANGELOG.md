@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 - 2026-11-16
+
+- Burn-rate forecast for every 5-hour and weekly quota: a least-squares rate over recent fresh readings in the current reset cycle (last hour for 5h, last 12 h for weekly). Cards show "预计 HH:mm 用完" or "按当前速度可用到重置"; the compact strip warns before the 5h or weekly quota runs out; tooltips show the rate in %/hour. Forecasts need about 10 minutes (5h) or 2 hours (weekly) of readings and never mix reset cycles.
+- Optional early-warning notification (with low-quota notifications enabled): 5h quota projected to run out within 30 minutes, weekly within 24 hours; once per window and reset cycle.
+- Forecast history (timestamps and percentages only) persists locally in `logs/usage-history.json` across restarts.
+- Local Codex usage from `<CODEX_HOME>/sessions/**/rollout-*.jsonl`: per-call `last_token_usage`, repeated events and forked copies counted once, model taken from `turn_context`, cached input split out, OpenAI list-price cost estimate. Incremental reads with an aggregate-only cache per account.
+- Seven-day token trend chart on Codex and Claude cards (today highlighted); tooltips list the daily breakdown.
+- iPhone PWA shows local usage for Codex accounts as well.
+
 ## 1.0.0 - 2026-11-16
 
 - Add a Claude account slot next to the two Codex accounts. It reads the Claude subscription 5-hour and weekly (all-model) quota from Claude Code's own login, plus model-specific weekly windows (Sonnet / Opus) when Claude reports them.

@@ -88,7 +88,7 @@
         fetchedAt: profile.fetchedAt || null,
         fiveHour: normalizeWindow(profile.fiveHour, '5h'),
         longTerm,
-        localUsage: profile.id === 'claude' ? normalizeLocalUsage(profile.localUsage) : null
+        localUsage: normalizeLocalUsage(profile.localUsage)
       };
     });
     return {

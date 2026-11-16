@@ -77,6 +77,8 @@ function check(condition, message) {
   check(CodexMobileModel.validateSnapshot({ version: 1, type: 'usage_snapshot', publishedAt: new Date().toISOString(), profiles: [{ id: 'claude', ok: true, localUsage: { today: { totalTokens: 'x' } } }] }).profiles[0].localUsage === null, 'Malformed local usage is dropped.');
   check(CodexMobileModel.formatTokens(1234567) === '1.2M' && CodexMobileModel.formatUsd(0.001) === '<$0.01', 'Token and cost formatting.');
   check(mobileApp.includes("'CLAUDE'"), 'Claude cards are labelled.');
+  const codexLocal = CodexMobileModel.validateSnapshot({ version: 1, type: 'usage_snapshot', publishedAt: new Date().toISOString(), profiles: [{ id: 'personal', ok: true, localUsage: { today: { totalTokens: 10, costUsd: 0.01 }, week: { totalTokens: 20, costUsd: 0.02 } } }] });
+  check(codexLocal.profiles[0].localUsage.week.totalTokens === 20, 'Codex accounts carry local usage too.');
 
   process.stdout.write(`Mobile JavaScript: ${checks} checks passed.\n`);
 })().catch((error) => {

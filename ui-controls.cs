@@ -390,6 +390,64 @@ namespace CodexUsage {
         }
     }
 
+    // Seven-day token trend: bottom-aligned bars, today's bar highlighted with a glow,
+    // day captions underneath. Values are relative to the week's maximum.
+    public sealed class UsageSparkline : Control {
+        double[] values = new double[0];
+        string[] labels = new string[0];
+        public Color BarColor { get; set; }
+        public Color TrackColor { get; set; }
+        public Color CaptionColor { get; set; }
+        public int HighlightIndex { get; set; }
+        public UsageSparkline() {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BarColor = Color.FromArgb(34, 227, 255);
+            TrackColor = Color.FromArgb(20, 34, 58);
+            CaptionColor = Color.FromArgb(79, 134, 176);
+            HighlightIndex = -1;
+        }
+        public double[] Values { get { return values; } }
+        public string[] Labels { get { return labels; } }
+        public void SetData(double[] data, string[] captions) {
+            values = data ?? new double[0];
+            labels = captions ?? new string[0];
+            Invalidate();
+        }
+        protected override void OnPaint(PaintEventArgs e) {
+            base.OnPaint(e);
+            int count = values.Length;
+            if (count == 0 || Width < 8 || Height < 12) return;
+            float captionHeight = Math.Max(10f, Height * 0.3f);
+            float chartHeight = Height - captionHeight - 2;
+            float gap = Math.Max(3f, Width / (count * 6f));
+            float bar = (Width - gap * (count - 1)) / count;
+            double max = 0;
+            foreach (double v in values) if (!Double.IsNaN(v) && v > max) max = v;
+            e.Graphics.SmoothingMode = SmoothingMode.None;
+            using (var track = new SolidBrush(TrackColor))
+            using (var dim = new SolidBrush(Hud.Dim(BarColor, 120)))
+            using (var bright = new SolidBrush(BarColor))
+            using (var glow = new SolidBrush(Hud.Dim(BarColor, 45)))
+            using (var font = new Font("Microsoft YaHei UI", Math.Max(7f, captionHeight * 0.78f), FontStyle.Regular, GraphicsUnit.Pixel)) {
+                for (int i = 0; i < count; i++) {
+                    float x = i * (bar + gap);
+                    e.Graphics.FillRectangle(track, x, 0, bar, chartHeight);
+                    double v = values[i];
+                    if (max > 0 && v > 0 && !Double.IsNaN(v)) {
+                        float h = Math.Max(2f, (float)(chartHeight * v / max));
+                        bool today = i == HighlightIndex;
+                        if (today) e.Graphics.FillRectangle(glow, x - 2, chartHeight - h - 2, bar + 4, h + 2);
+                        e.Graphics.FillRectangle(today ? bright : dim, x, chartHeight - h, bar, h);
+                    }
+                    if (i < labels.Length && !string.IsNullOrEmpty(labels[i]))
+                        TextRenderer.DrawText(e.Graphics, labels[i], font, new Rectangle((int)x - 4, (int)(chartHeight + 2), (int)bar + 8, (int)captionHeight),
+                            i == HighlightIndex ? BarColor : CaptionColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                }
+            }
+        }
+    }
+
     // Dark HUD context menu: navy surface, cyan selection and check marks.
     public sealed class HudColorTable : ProfessionalColorTable {
         readonly Color back, border, select;
