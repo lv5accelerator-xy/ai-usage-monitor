@@ -391,7 +391,8 @@ namespace CodexUsageDesktop {
             ((Dictionary<string, object>)P(tooltip, 1)["weekly"])["resetsAt"] = DateTimeOffset.Now.AddDays(3).AddHours(1).ToString("o");
             ((Dictionary<string, object>)P(tooltip, 1)["individualLimit"])["resetsAt"] = DateTimeOffset.Now.AddDays(20).AddHours(1).ToString("o");
             app.UpdateBallSummary(tooltip);
-            Check(app.ToolTip.GetToolTip(app.RingCells["work-long"]).EndsWith(Model.ResetText(J.Get(P(tooltip, 1), "weekly", "resetsAt"))), "Weekly-limited ring tooltip uses the weekly reset.");
+            string weeklyTip = app.ToolTip.GetToolTip(app.RingCells["work-long"]), weeklyExpected = Model.ResetText(J.Get(P(tooltip, 1), "weekly", "resetsAt"));
+            Check(weeklyTip.EndsWith(weeklyExpected), "Weekly-limited ring tooltip uses the weekly reset. expected=" + weeklyExpected + " actual=" + weeklyTip.Replace("\r\n", " | "));
             ((Dictionary<string, object>)P(tooltip, 1)["individualLimit"])["remainingPercent"] = 10;
             app.UpdateBallSummary(tooltip);
             Check(app.ToolTip.GetToolTip(app.RingCells["work-long"]).EndsWith(Model.ResetText(J.Get(P(tooltip, 1), "individualLimit", "resetsAt"))), "Monthly-limited ring tooltip uses the monthly reset.");
