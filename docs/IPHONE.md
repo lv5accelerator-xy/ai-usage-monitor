@@ -18,7 +18,7 @@
 
 ### iPhone
 
-1. 用 Safari 打开 `https://lv5accelerator-xy.github.io/codex-dual-usage-dashboard/`。
+1. 用 Safari 打开 `https://lv5accelerator-xy.github.io/ai-usage-monitor/`。
 2. 中继地址保持 `https://ntfy.sh`，除非你在电脑上使用了自己的 ntfy 地址。
 3. 输入刚才从电脑复制的配对密钥。
 4. 如果这是你自己的受信任手机，可以勾选 **在此设备记住配对密钥**。不勾选时，关闭本次 Safari 会话后可能需要重新输入。

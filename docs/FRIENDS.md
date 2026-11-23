@@ -12,7 +12,7 @@
 ## 第一次使用
 
 1. 从固定发布页下载 `CodexUsage.exe`：
-   https://github.com/lv5accelerator-xy/codex-dual-usage-dashboard/releases/latest
+   https://github.com/lv5accelerator-xy/ai-usage-monitor/releases/latest
 2. 双击后点击“安装并启动”。无需管理员权限，安装到当前用户目录，并创建桌面与开始菜单快捷方式。
 3. 首次启动会打开 **账号与首次使用**：选择一个或两个账号，可修改显示名称。按“安装 CLI”或“登录 / 切换”完成引导，然后点击“重新检测”。只有成功读取额度后才显示“已连接”。此页面也可从右键菜单打开。
 4. 小窗显示“5h / 长周期”两项剩余百分比。长周期指长周期额度，不是二者相加。5h 为 0 时，下方显示预计恢复倒计时，悬停查看本机时间的准确恢复时刻；缺失、过期或未更新的数据会明确提示。额度每分钟刷新；右键可调整紧凑小窗透明度、开启低额度通知。

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.2 - 2026-11-23
+
+- 仓库改名为 `lv5accelerator-xy/ai-usage-monitor`：客户端的更新源、"版本说明 / 下载客户端"、"使用指南"和手机额度网址都改用新地址。
+- 2.1.1 及更早的客户端会因为下载地址与旧仓库名不一致而停止自动更新，需要手动下载一次本版 [CodexUsage.exe](https://github.com/lv5accelerator-xy/ai-usage-monitor/releases/latest/download/CodexUsage.exe)；之后照常自动更新。设置、账号和通知记录保留。
+- iPhone 手机额度网页地址改为 `https://lv5accelerator-xy.github.io/ai-usage-monitor/`，需要在 Safari 打开新地址后重新"添加到主屏幕"并输入配对密钥。
+
 ## 2.1.1 - 2026-11-16
 
 - Fewer notifications: the read-failure reminder no longer repeats when reads flap (e.g. the Claude usage endpoint rate-limiting while you are idle, then one good read, then failing again). An account is reported at most once every 12 hours, and **额度读取已恢复** only appears after 10 minutes of successful reads.
