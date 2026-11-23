@@ -11,7 +11,7 @@ using CodexUsage;
 
 namespace CodexUsageDesktop {
     public sealed partial class TrayApp {
-        public const string MobileUrl = "https://lv5accelerator-xy.github.io/codex-dual-usage-dashboard/";
+        public const string MobileUrl = "https://lv5accelerator-xy.github.io/ai-usage-monitor/";
 
         // Entry point for the UI process. Returns the process exit code.
         public static int Run(string dataDir, bool smoke) {

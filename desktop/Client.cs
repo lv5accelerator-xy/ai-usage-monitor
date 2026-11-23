@@ -32,7 +32,7 @@ namespace CodexUsageDesktop {
     public sealed class PendingUpdate { public string Path; public UpdateManifest Manifest; }
 
     public static class Client {
-        public const string Repository = "lv5accelerator-xy/codex-dual-usage-dashboard";
+        public const string Repository = "lv5accelerator-xy/ai-usage-monitor";
         public const string ExeName = "CodexUsage.exe";
         public static string CurrentVersion { get { return Assembly.GetExecutingAssembly().GetName().Version.ToString(3); } }
         public static string Self { get { return Assembly.GetExecutingAssembly().Location; } }

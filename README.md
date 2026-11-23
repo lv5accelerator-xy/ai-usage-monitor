@@ -1,272 +1,85 @@
-# Codex + Claude Usage Dashboard
+# Codex 额度：Codex + Claude 用量悬浮监控
 
-Windows desktop quota monitor for two ChatGPT/Codex accounts (Personal + Work) and one Claude account.
+[![Validate](https://github.com/lv5accelerator-xy/ai-usage-monitor/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/lv5accelerator-xy/ai-usage-monitor/actions/workflows/validate.yml)
 
-Current version: **v2.1.0**
+Windows 桌面悬浮窗，同时显示两个 ChatGPT/Codex 账号（个人 + 工作）与一个 Claude 账号的 5 小时 / 每周剩余额度、预计用完时间和本机用量统计；可选的 iPhone 网页同步查看。原生 .NET Framework 4.8 客户端，无需管理员权限。
 
-## v2.1.0: beta channel and more reminders
+**[▶ 下载最新版 CodexUsage.exe](https://github.com/lv5accelerator-xy/ai-usage-monitor/releases/latest/download/CodexUsage.exe)** · [iPhone 手机额度](https://lv5accelerator-xy.github.io/ai-usage-monitor/) · [安装与分享指南](docs/FRIENDS.md)
 
-- **Beta channel.** Every new version is first published as a prerelease. Only clients with **客户端更新 → 接收测试版** enabled receive it. After testing, run the **Promote release to stable** GitHub Actions workflow (or ask for it) and all other clients update automatically. Friends stay on the stable channel by default.
-- **Quota recovered.** A notification when a used-up 5-hour or weekly quota becomes available again.
-- **Read failures.** A notification when an account (or the whole reader) has failed for 15 minutes, with a hint for the likely cause, and another when it reconnects. Both reminders can be turned off under right-click **通知**.
+## 功能
 
-## v2.0.0: native C# client
+- **额度悬浮窗**：每个账号的 5 小时与长周期剩余百分比，紧凑条 / 展开面板 / 贴边圆环三种形态，支持贴边吸附与透明度调节。
+- **预计用完时间**：按当前消耗速度估算“预计 15:40 用完”，快用完前可提前通知。
+- **本机用量**：Codex 与 Claude Code 今日 / 七日的 tokens、请求数、主要模型与按公开价估算的费用，附七日趋势。
+- **提醒**：低额度、额度恢复、读取异常与重新连上的 Windows 通知，均可单独关闭。
+- **跨设备**：两台电脑互相推送 Codex 任务完成通知；加密同步额度快照到 iPhone 网页。
+- **自动更新**：启动后与每 6 小时检查 Release，校验大小、SHA-256 与版本后安装，失败自动回滚；可选测试版通道。
 
-- **No PowerShell at runtime.** The floating monitor, detail panel, tray menu, account and remote-notification dialogs, the refresh lifecycle and the cross-device notification / mobile sync worker are now part of `CodexUsage.exe`. Starting the app no longer launches hidden `powershell.exe -ExecutionPolicy Bypass` processes, which security software and managed PCs often block or flag.
-- **Same data, same behavior.** `profiles.json`, `ui-settings.json`, notification history, forecast history and remote settings are read as before; paired PCs and the iPhone PWA keep working (same relay topics and AES-256-CBC + HMAC-SHA256 format, verified against the shared test vector).
-- **Lighter and steadier.** One .NET Framework 4.8 process for the UI plus a short-lived reader per refresh; the background worker runs as a thread instead of a second PowerShell host. Type checking at build time replaces a class of Windows PowerShell 5.1 runtime quirks.
-- **Login helpers stay scripts.** "安装 / 登录" still opens the small `.bat`/`.ps1` helpers for the Codex CLI and Claude Code login, only when you click them.
+各界面与设置的详细说明见[使用说明](docs/USER_GUIDE.md)。
 
-## v1.1.0: forecasts and trends
+## 当前版本
 
-- **Burn-rate forecast.** Each 5-hour and weekly quota estimates when it will run out at the current pace ("预计 15:40 用完") or confirms it lasts until reset. The compact strip turns amber before you run out, and an optional notification warns 30 minutes (5h) or 24 hours (weekly) ahead. Forecasts start after ~10 minutes (5h) / ~2 hours (weekly) of readings.
-- **Codex local usage.** Today / seven-day tokens, requests, main model and an OpenAI list-price estimate from Codex's local session logs, alongside the existing Claude statistics.
-- **Seven-day trend.** A small bar chart on each card; hover for the daily breakdown.
+<!-- CURRENT_VERSION_START -->
+**v2.1.2**
+仓库改名为 `ai-usage-monitor`，更新源与手机网址随之更换。2.1.1 及更早的客户端需手动下载一次本版，之后照常自动更新；iPhone 需打开新地址重新添加到主屏幕。
+<!-- CURRENT_VERSION_END -->
 
-## v1.0.0: Codex and Claude in one monitor
+完整更新记录见 [CHANGELOG](CHANGELOG.md)，各版本亮点见[版本亮点](docs/RELEASE_HIGHLIGHTS.md)。
 
-- **Claude quota.** The Claude slot shows the subscription **5-hour** and **weekly (all models)** remaining quota with reset countdowns, the same way as Codex. Model-specific weekly windows (for example Sonnet) appear in the detail card and tooltips when Claude reports them.
-- **Local Claude Code usage.** Today and the last seven days: tokens (input / output / cache write / cache read), requests, main model and an estimated cost at public API prices. Subscription users are not billed per token; the figure is a comparison aid. Hover the usage line for a daily breakdown.
-- **No subscription login?** The card still shows local usage and marks quota as unavailable.
-- **Setup.** Install and log in to [Claude Code](https://docs.claude.com/en/docs/claude-code/setup), then open **账号与首次使用** and enable **Claude**, or use **账号登录 / 切换 → Claude 账号** for a guided install and `/login`. Upgrades add the Claude slot automatically and enable it only if Claude Code is already used on this computer.
-- **Privacy.** The dashboard reads `%USERPROFILE%\.claude\.credentials.json` (or `CLAUDE_CONFIG_DIR`) only to send one HTTPS request to Anthropic's usage endpoint. The token is never cached, logged, uploaded to the phone or refreshed. Refreshing would rotate Claude Code's refresh token and can log out running sessions, so an expired login asks you to open Claude Code once instead. Local statistics cache only token counts per message id, never prompts or responses.
-- **Rate limits.** Claude quota is requested at most every two minutes. On rate limiting or network errors the last reading (up to 15 minutes old) is reused; older values are marked stale.
-- **Mobile.** The iPhone PWA shows the Claude card plus aggregate today / seven-day tokens and cost.
+## 安装
 
-The Claude usage endpoint is the one Claude Code itself uses for its usage view. It is not a documented public API and may change; the dashboard then shows an error for the Claude card while Codex continues to work.
+1. 下载 [CodexUsage.exe](https://github.com/lv5accelerator-xy/ai-usage-monitor/releases/latest/download/CodexUsage.exe)，双击后选择 **安装并启动**。程序装到 `%LOCALAPPDATA%\CodexUsage`，并创建桌面和开始菜单快捷方式。
+2. 首次启动会打开 **账号与首次使用**：启用需要的 Codex 账号槽位与 Claude，按提示安装 Codex CLI / Claude Code 并登录。
+3. 卸载在 Windows 设置 → 应用 → **Codex 额度**；设置与账号目录保留，方便重装。
 
-## Windows EXE client (recommended)
+系统要求：Windows 10/11（自带 .NET Framework 4.8）；Codex 账号需要 Codex CLI，Claude 账号需要 Claude Code；Windows PowerShell 5.1 只用于可选的登录助手。EXE 未签名，首次运行可能出现 SmartScreen 提示。
 
-[Download the latest CodexUsage.exe](https://github.com/lv5accelerator-xy/codex-dual-usage-dashboard/releases/latest/download/CodexUsage.exe)
+从源码运行：执行 `first-run-setup.bat` 设置并登录两个独立的 Codex 目录（`%USERPROFILE%\.codex-personal`、`%USERPROFILE%\.codex-work`），再运行 `start.bat` 编译并启动 `dist\CodexUsage.exe`。
 
-Double-click the EXE and select **安装并启动** in the installation window. It installs into `%LOCALAPPDATA%\CodexUsage` and creates desktop and Start menu shortcuts without administrator permissions. The client is a native .NET Framework 4.8 WinForms application (built into Windows 10/11); it does not require a separate .NET 8 or Electron runtime. Since v2.0 the UI and background worker are C#; only the optional login helpers use Windows PowerShell.
+## 隐私与安全
 
-**Upgrading from the script version:** quit the old tray app, put the EXE in the old app folder, and run it once. If present, `ui-settings.json` and `profiles.json` are copied into the client's separate data directory. Existing `.codex-personal` / `.codex-work` login credentials stay where they are; no credentials are bundled or uploaded.
+- 登录凭据只留在本机的 Codex / Claude 目录，不打包、不上传、不写入日志；Claude 令牌只用于向 Anthropic 用量接口发一次请求，不缓存、不刷新。
+- 手机端只收到白名单内的额度快照，经本机 AES-256-CBC + HMAC-SHA256 加密后转发；配对密钥不进入网址。见[手机端安全评估](docs/MOBILE-SECURITY.md)。
+- Claude 用量接口是 Claude Code 自身使用的接口，不是公开文档化的 API，可能变化；届时只有 Claude 卡片报错，Codex 照常工作。
 
-### Sharing and uninstalling
+## 仓库结构
 
-[中文安装与分享指南](docs/FRIENDS.md) — share the release link with friends; each person logs in with their own account. Do not share local account files or logs.
+| 路径 | 内容 |
+| --- | --- |
+| `desktop/` | C# 客户端：安装与更新（`Client.cs`）、悬浮窗与面板（`TrayApp*.cs`）、额度规则（`AppModel.cs`）、跨设备通知（`RemoteWorker.cs`）、Codex 读取（`UsageReader.cs`）、构建脚本 |
+| `claude-reader.cs`、`ui-controls.cs` | Claude 额度与本机用量统计；圆环、分段条、趋势图等原生控件 |
+| `mobile/` | iPhone 手机额度 PWA，零依赖静态页面，[开发说明](mobile/README.md) |
+| `setup-*.ps1`、`login-*.bat`、`install-codex-cli.*`、`codex-tools.ps1` | 可选的安装与登录助手 |
+| `profiles.json` | 账号显示名与本机目录 |
+| `tests/` | 离线模型、读取器、助手与 PWA 测试 |
+| `docs/` | [使用说明](docs/USER_GUIDE.md)、[版本亮点](docs/RELEASE_HIGHLIGHTS.md)、[安装与分享](docs/FRIENDS.md)、[iPhone 使用](docs/IPHONE.md)、[手机端安全](docs/MOBILE-SECURITY.md) |
+| `assets/` | 图标设计与源文件，[说明](assets/README.md) |
+| `.github/` | 校验构建、Pages 部署与测试版转正工作流 |
 
-The client is listed as **Codex 额度** in Windows Settings → Apps. Quit the tray app before uninstalling. Uninstall removes program files and shortcuts while preserving settings and Codex account directories for reinstallation. No administrator privileges are needed.
+## 开发与测试
 
-History: v0.5–v1.1 migrated the reader, updater, window integration and drawing controls to C# step by step; v2.0 completes the migration for the UI and worker. An unsigned EXE can still trigger SmartScreen reputation prompts.
-
-Releases include `READ-ME.txt` and `SHA256SUMS.txt` alongside the EXE and update manifest. Checksums verify consistency, not publisher identity.
-
-### Automatic client updates
-
-- New versions are published as **prereleases** first and reach only clients with **客户端更新 → 接收测试版** enabled. The **Promote release to stable** workflow (Actions → Run workflow, optional tag) marks a tested prerelease as the latest stable release; stable clients then update as usual. The promoted binary is identical to the tested one.
-
-- Checks the repository's latest stable GitHub Release after startup and every six hours. This is background polling, not server push.
-- Downloads newer versions automatically and verifies the size, SHA-256 checksum, and embedded executable version.
-- Right-click **客户端更新 → 重启并更新** to apply a downloaded update immediately. Normal exit also installs it; the next launch uses the new version.
-- Right-click **客户端更新 → 立即检查更新** to check manually.
-- Installation uses an atomic file replacement and retains the previous EXE. A failed post-update UI startup attempts to restore the previous version.
-- Account configuration, UI preferences and notification history are kept under `%LOCALAPPDATA%\CodexUsage\data`, outside the versioned program files. They survive updates.
-- If offline or a download fails verification, the running version remains available. Client logs are in `%LOCALAPPDATA%\CodexUsage\client.log`.
-
-The release EXE is **unsigned**; Windows may show a publisher/reputation prompt. SHA-256 checks provide download integrity, not publisher signing. Notifications remain subject to Windows notification settings.
-
-### Building and releasing
-
-Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1` on Windows to create `dist/CodexUsage.exe` and `dist/update.json`.
-
-GitHub Actions validates the source UI, builds the EXE, runs the packaged UI plus migration/integrity tests, and publishes a GitHub Release when `VERSION` is new. Published version assets are immutable: increment `VERSION` for each release. No developer API key or signing secret is required for the current unsigned build.
-
-[Icon design and source assets](assets/README.md)
-
-## iPhone / Mobile Dashboard
-
-v0.8.0 adds **Codex Usage Mobile**, a small installable PWA for viewing Personal and Work quota from an iPhone. Windows remains the only component that reads Codex. It publishes an allowlisted usage snapshot through a separate encrypted ntfy topic; the browser authenticates and decrypts it locally.
-
-### First-time setup
-
-1. On Windows, right-click Codex 额度 and open **远程通知与手机额度**.
-2. Check **启用手机额度同步**, generate or enter a pairing key, save, and copy the pairing key.
-3. In this repository, enable GitHub Pages with **Settings → Pages → Source → GitHub Actions**. The expected site is `https://lv5accelerator-xy.github.io/codex-dual-usage-dashboard/`.
-4. Open that HTTPS address in iPhone Safari, enter the relay address and pairing key, then tap **连接**.
-5. In Safari choose **分享 → 添加到主屏幕 → 添加**. Open **Codex 额度** from the new icon.
-
-The iPhone never receives Codex `auth.json`, access/refresh tokens, cookies, account IDs, Codex profile paths, session logs, or conversation content. The pairing key is stored in `localStorage` only when **在此设备记住配对密钥** is selected; otherwise it is kept for the current browser session only. It is never placed in the URL. If a phone is lost, generate a new pairing key on Windows and save it so the old phone cannot decrypt new snapshots.
-
-[面向非开发人员的 iPhone 使用方法](docs/IPHONE.md) · [Mobile security review](docs/MOBILE-SECURITY.md) · [PWA developer notes](mobile/README.md)
-
-The mobile refresh button fetches the latest relay snapshot. It does not remotely command the Windows computer or log in to Codex. The PWA shell works offline, but quota snapshots are not persisted by the service worker.
-
-## v0.8.0: encrypted iPhone quota PWA
-
-- Adds an opt-in, independently controlled mobile usage sync that can run without completion notifications.
-- Reuses the v1 AES-256-CBC + HMAC-SHA256 message format while deriving a separate non-guessable usage topic.
-- Queues a strictly allowlisted snapshot atomically after desktop refresh; the background worker handles network I/O, duplicate suppression, five-minute heartbeat, and retry backoff.
-- Adds a zero-dependency installable PWA with latest-message polling, EventSource updates, foreground recovery, local countdowns, freshness/offline states, and an offline app shell.
-- Adds GitHub Pages deployment plus PowerShell/JavaScript compatibility and privacy regressions.
-
-## v0.7.0: cross-device Codex completion notifications
-
-- Adds opt-in **跨电脑 Codex 完成通知** in the tray menu. Two PCs using the same pairing key can notify each other when a persisted Codex turn finishes.
-- Watches the official local Codex rollout records under `.codex*/sessions/.../*.jsonl` and reacts to persisted `event_msg / task_complete` records rather than guessing from process exit.
-- Sends device name, project folder, completion/error state and finish time. The final assistant response is **off by default** and can be enabled as an optional summary (capped at 800 characters).
-- Relay payloads are encrypted and authenticated locally with keys derived from the pairing secret; the public relay topic is a SHA-256-derived identifier and does not contain the secret itself.
-- Uses `https://ntfy.sh` as the default relay and supports a custom HTTPS ntfy-compatible endpoint (plain HTTP is allowed only for localhost).
-- Deduplicates remote events by device/turn id and keeps a bounded local notification ledger. Existing historical turns are not replayed when the watcher starts.
-- Includes offline regression tests for encryption/authentication, tamper rejection, project extraction, task-complete parsing, privacy defaults and relay URL validation.
-
-## v0.6.2: bounded memory during repeated refreshes
-
-- Avoid Windows PowerShell 5.1 `Select-Object -First` repeatedly decorating the same account object's type metadata. Direct account lookup prevents growing type-name strings and binding caches.
-- Refresh displayed countdown/status text every 15 seconds; quota requests remain once per minute, and recovery/full-screen checks remain once per second. Manual refresh results still render immediately.
-- Stop worker polling when idle, avoid reparsing unchanged updater status, and unregister card handlers/tooltips before disposal.
-- Windows CI checks 2,000 idle status updates plus 240 accelerated refresh cycles, retained heap/private memory growth, collectible cards, and bounded process handles. These are accelerated fixture tests, not a claim of a real multi-hour soak or a fixed RAM ceiling on every PC.
-
-## v0.6.1: account settings save fix
-
-Fixes the Windows PowerShell path error when saving account names or enabled accounts. Atomic replacement now uses an explicit backup path. The Windows UI test clicks the actual Save button, reloads the saved JSON, verifies account paths are preserved, and exercises repeated saves.
-
-## v0.6.0: accounts, recovery and desktop integration
-
-- Compact quotas have **independent colors**. Exhausted 5h does not turn a healthy long-term value red. “总量” is renamed **长周期** throughout the current UI.
-- At zero 5h quota, the second line shows a live **estimated recovery countdown**. Hover for the exact local reset timestamp. Once the reported reset is due, the UI requests one immediate refresh per account/reset, while regular one-minute polling continues. Missing and stale values never claim replenishment.
-- **账号与首次使用** opens automatically on first run and is available from the right-click menu. Enable one or two account slots and edit display names (up to 12 characters). Disabled accounts are hidden and are not queried. Names and enablement are saved atomically in profiles.json; existing profile paths and login data are retained.
-- Setup distinguishes missing CLI, missing login, existing credentials awaiting verification, and a fresh successful connection. “安装 CLI” / “登录 / 切换” opens the existing guided setup; “重新检测” rechecks installation and requests a quota refresh. A credential file alone is never labelled connected.
-- **开机启动** and **全屏时隐藏悬浮窗** are opt-in, off by default. Startup uses the current user's Run registry entry and is removed on uninstall. Full-screen detection is scoped to the monitor containing the floating window; returning from the full-screen application restores the user's visibility preference.
-- The native window layer handles per-monitor DPI changes, rescales controls, and periodically moves off-screen windows into a connected display's working area. Automated tests cover scaling roundtrips and negative-coordinate monitor geometry; mixed-DPI physical monitors still warrant real-device testing.
-- Background client downloads show percentages and distinguish network, integrity, permission and disk errors. “立即检查更新” retries after failure; the installed version remains intact.
-- The EXE uses a **C# quota reader** with bounded RPC waits, continuously drained stderr, independent per-account errors, and a Windows job object to clean up server children. The source/script launcher retains its PowerShell reader as a fallback. Native-reader tests talk to a local fixture server without account access.
-
-This release advances the C# migration; it does not remove the Windows PowerShell runtime requirement for the UI and login workflow.
-
-## v0.4.2: adjustable compact transparency and one-minute refresh
-
-The monitor defaults to **清晰模式（不透明）** for readable text. Disable this right-click option to restore the saved transparency: **紧凑小窗透明度** selects **0–60% transparency**, initially 20%. Clear mode disables the slider and preserves its saved value. Windows opacity affects the entire window, including text; the expanded monitor and detail panel remain fully opaque. **悬浮窗大小 → 小 / 中 / 大** selects a preferred 100%, 120%, or 140% size independently of monitor DPI, including the rings, compact strip and expanded monitor. If a small display cannot fit that size, the window scales down to its working area while keeping the saved preference. Both preferences survive restarts.
-
-Automatic quota refresh now runs every **60 seconds**. If a read is still running, the next tick is skipped rather than starting an overlapping worker.
-
-The packaged native reader runs up to two account reads concurrently, with independent RPC timeouts and per-account success/error results. Each completed account is displayed immediately while the other keeps its last successful values; hover over a quota or account to see that account's own update time. The UI rejects progress from an outdated account configuration. Display-change and resume messages restore visible window placement; resume cancels an obsolete reader and requests fresh data. Automated fixtures cover simulated mixed-DPI displays, disconnection, resolution reduction, resume and persisted restart placement. Physical mixed-DPI multi-monitor testing remains a separate device check.
-
-## v0.4.1: compact mode, edge snapping, optional alerts
-
-The monitor now starts as a **360 × 64 logical-pixel strip** (220 pixels wide with one enabled account). Each account shows **5h remaining / long-term remaining** as two independent percentages. “Long-term” means the limiting long-term quota (weekly or meaningful monthly/workspace quota), not the sum of windows. When 5h reaches zero, the second line shows the estimated time until recovery; the tooltip shows the exact local timestamp. Missing reset times remain unknown; expired reset times wait for a fresh reading; stale data asks for confirmation. Hover to expand the full 5-hour/long-term view; move away for about half a second to collapse. It stays expanded while the detail panel or context menu is open, and never changes size during a drag. Right-click **紧凑模式（悬停展开）** to keep the full monitor visible instead.
-
-**贴边吸附** is enabled by default. Release the monitor within 20 logical pixels of a screen's working-area edge to snap to it. Taskbars and negative-coordinate monitors are supported. A bottom-docked strip expands upward and returns to the same resting position. Drag away to detach, or turn snapping off in the right-click menu.
-
-**低额度通知 → 启用通知** is off by default. Threshold presets are **20% / 10%**, **10% only**, or **30% / 15%**. Notifications identify the account and quota window; clicking a notification opens the detail panel. Windows notification settings / Do Not Disturb may suppress delivery.
-
-- Only fresh, successful reads crossing a threshold can notify. Failed, missing, stale, or already-expired quota data never triggers an alert.
-- The first successful sample after startup, enabling notifications, or changing thresholds establishes a baseline without notifying.
-- Each threshold is notified at most once per account and quota window/reset cycle. Crossing two thresholds in one read produces one message for that window.
-- The deduplication ledger is retained locally in `logs/notification-state.json` across restarts. No credentials are stored in it.
-- A new reset timestamp starts a new cycle. If no timestamp is available, recovery above all configured thresholds rearms alerts. A gap of ten minutes or more establishes a new comparison baseline without notifying.
-- Compact/expanded preference, snapping, resting position, and notification preferences are saved in `ui-settings.json`. Collapsed values marked **!** are stale or unavailable; hover for details.
-
-## Edge ring mode
-
-Right-click **贴边圆环（点击查看详情）** to show each enabled account's **5h** and **long-term** remaining quota as separate rings. Rings always form one vertical column, even at the top/bottom edge. The strip is 60 logical pixels wide; each ring is 40 pixels across. Account names and quota-window labels occupy separate lines, making the strip 328 logical pixels tall for two accounts or 168 for one. The narrow width is preserved on first show, and ring text scales once with monitor DPI. Drag the group to any edge. Click a ring to open details, hover for its full account name, freshness information and the displayed quota's reset time, or right-click to switch back. The mode and position survive restarts. Compact opacity also applies to rings.
-
-Missing values display **—**, positive quota below 1% displays **<1%** across desktop and mobile views, exhausted quota displays **0%**, and stale values are muted and marked **!**. Ring mode stays compact while hovering. It can stay anywhere in the working area. When **贴边吸附** is enabled, releasing within 20 logical pixels of any edge snaps to that edge; drag away to detach. Disable **贴边吸附** for fully free placement.
-
-v0.9.0 also includes the Windows remote-worker HOME-variable fix from PR #4. Install and restart the new desktop build to apply it; a successful build alone does not verify real iPhone synchronization.
-
-## Floating monitor
-
-Start **Codex 额度** from the desktop shortcut to open a compact rounded panel. Aligned columns show the remaining **5-hour** and **long-term** quotas for each account, with a visible update timestamp or stale-data warning.
-
-| Account | 5-hour remaining | Long-term remaining |
-| --- | ---: | ---: |
-| Personal | 100% | 95% |
-| Work | 49% | 21% |
-
-*Example values, not live account data.*
-
-- **长周期 (long-term)** is the lower remaining percentage of Weekly and a meaningful monthly/workspace limit. It is not a sum or a shared balance. Hover over it to see the source and individual values.
-- **—** means the quota was not provided; **0%** means the reported quota is exhausted.
-- Drag anywhere on the monitor to move it; click to expand/collapse the detail panel.
-- Right-click for refresh, visibility, always-on-top, reset position, account login/switch, logs, and exit.
-- Low remaining values are highlighted individually: amber at 35% or below, red at 15% or below. Old/unknown values are muted.
-
-## Detail panel
-
-The movable, resizable panel uses a neutral dark theme, consistent Chinese typography, larger primary numbers, rounded quota bars, and direct account login actions. All percentages represent **remaining** quota.
-
-Quota order:
-
-1. 5-hour remaining
-2. Workspace/monthly remaining, when a meaningful limit is provided
-3. Weekly remaining
-
-Hover over reset times for the exact local timestamp and monthly used/limit details. Smaller windows scroll vertically; refreshes preserve the scroll position. Layout dimensions scale with the Windows system DPI when the app starts. The native window layer handles per-monitor DPI changes; physical mixed-DPI monitor combinations have not all been tested.
-
-## Refresh and data freshness
-
-- Refresh runs silently every **1 minute** and can also be triggered manually.
-- Both manual and automatic failures retain the last successful values and show **数据未更新**.
-- One account can continue updating while the other retains its last successful data. Profiles are matched by ID, not array order.
-- Data older than ten minutes is marked stale even if there is no explicit refresh error.
-- A read taking longer than 150 seconds is timed out so refresh does not remain permanently disabled.
-- Retained values are in-memory only. Restarting the app waits for a fresh read.
-
-## Persistent UI settings
-
-`ui-settings.json` remembers monitor position, detail-panel position/size, visibility, and always-on-top preference. Existing v0.3.x settings remain compatible. Settings are ignored by Git.
-
-## Requirements
-
-- Windows 10/11
-- .NET Framework 4.8 (included with Windows 10/11)
-- Windows PowerShell 5.1 only for the optional login helpers
-- Codex CLI (for Codex accounts)
-- Claude Code (for the Claude account)
-- The dashboard itself has no Node.js dependency
-
-## First run
-
-Run `first-run-setup.bat` to set up and log in two independent Codex homes:
-
-- Personal: `%USERPROFILE%\.codex-personal`
-- Work: `%USERPROFILE%\.codex-work`
-
-From a source checkout, `start.bat` builds `dist\CodexUsage.exe` with the Windows C# compiler and starts it. Releases are the recommended way to install and receive automatic updates.
-
-If startup fails, check `logs/startup.log`, `logs/startup-error.log`, `logs/tray.log`, and `logs/worker.log`.
-
-## Validation
-
-Offline tests (no account access, no network) run with Windows PowerShell 5.1 or PowerShell 7:
+离线测试不访问账号、不联网，可用 Windows PowerShell 5.1 或 PowerShell 7：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/model.tests.ps1         # quota rules, alerts, forecasts, snapping, mobile snapshot, crypto vector, background worker
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/claude-reader.tests.ps1 # Claude quota + Claude Code / Codex local logs
-node tests/mobile.tests.js                                                             # iPhone PWA
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/model.tests.ps1          # 额度规则、提醒、预测、吸附、手机快照、加密向量、后台线程
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/claude-reader.tests.ps1  # Claude 额度与本机用量日志
+node tests/mobile.tests.js                                                              # iPhone PWA
 ```
 
-Build the EXE and run the native UI smoke test with fixture data:
+构建 EXE 并用测试数据跑界面冒烟测试：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1
-dist\CodexUsage.exe --ui-smoke artifacts\ui-smoke-data   # report: artifacts\ui-smoke-data\logs\smoke-report.txt
+dist\CodexUsage.exe --ui-smoke artifacts\ui-smoke-data
 dist\CodexUsage.exe --self-test artifacts\client-self-test
 ```
 
-The smoke test drives real WinForms controls, never starts a quota reader, logs in or writes your settings, and saves screenshots. GitHub Actions runs all of the above on Windows and publishes screenshots/logs in the `windows-ui-preview` artifact.
+GitHub Actions 在 Windows 上运行以上全部测试，截图与日志在 `windows-ui-preview` 产物中。
 
-## Project files
+## 发布
 
-- `desktop/Client.cs` — installer, updater, rollback and process entry points (`--ui`, `--read-usage`, `--ui-smoke`, `--self-test`)
-- `desktop/TrayApp*.cs` — floating monitor, detail panel, tray menu, dialogs, refresh lifecycle, notifications
-- `desktop/AppModel.cs` — quota rules, merge/freshness, alerts, forecasts, snapping, settings, mobile snapshot, crypto
-- `desktop/RemoteWorker.cs` — cross-device completion notifications and mobile sync (background thread)
-- `desktop/UsageReader.cs` — Codex quota reader and child-process lifetime control
-- `claude-reader.cs` — Claude quota + local Claude Code / Codex usage statistics
-- `ui-controls.cs` — native drawing controls (rings, segmented bars, sparkline, HUD menu)
-- `desktop/UiSmoke.cs`, `desktop/SelfTest.cs` — packaged UI smoke test and client self-test
-- `setup-*.ps1`, `login-*.bat`, `codex-tools.ps1`, `install-codex-cli.*` — optional login/installation helpers
-- `mobile/` — static iPhone PWA; no Node.js runtime dependency
-- `profiles.json` — account labels and local profile paths
-- `tests/` — offline model/worker/reader tests and PWA tests
+`VERSION` 是发布号。推送到 `main` 且 `VERSION` 为新版本时，Actions 构建 EXE 并先发布为**测试版**（prerelease），只有开启“接收测试版”的客户端会收到；测试后运行 **Promote release to stable** 工作流转为正式版，所有客户端随之更新。已发布的版本资源不可修改，每次发布都要递增 `VERSION`。
 
-## Security
+## 授权
 
-Authentication stays in the user's local Codex profile directories. Never commit login credentials. Logs, runtime results, remote settings, pending mobile snapshots, UI preferences, test screenshots, and local Codex profiles are ignored by Git. The public Pages bundle contains only the app shell and no pairing key, topic, account data, or credentials.
-
-## GitHub ZIP downloads
-
-Extract **Code → Download ZIP** completely, then run `start.bat`. It compiles `dist\CodexUsage.exe` with the C# compiler that ships with .NET Framework 4.8 and starts the installer. Downloading the release EXE is simpler and receives automatic updates.
+仓库当前未附带开源许可证。仓库公开可见不代表代码可被任意复制、修改或再发布；如需使用，请先联系仓库所有者取得授权。
