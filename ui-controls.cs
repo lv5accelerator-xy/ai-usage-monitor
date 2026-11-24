@@ -33,13 +33,37 @@ namespace CodexUsage {
         }
     }
 
-    // Native window chrome helpers. Real DWM blur-behind is deliberately not used: WinForms
-    // paints labels and backgrounds with GDI, which leaves the alpha channel at 0, so blur
-    // turned those pixels see-through (white cards, haloed text; seen in v2.2.0). The glass
-    // look comes from a uniformly translucent layered window instead. Calls are best-effort.
+    // Native window helpers. DWM blur-behind is only safe for windows whose every pixel
+    // carries a real alpha value: GDI-painted WinForms controls leave alpha at 0, so blur made
+    // those pixels see-through in v2.2.0 (white cards, haloed text). The floating monitor
+    // therefore paints itself with GDI+ into a 32-bit bitmap and shows it with
+    // UpdateLayeredWindow (see FloatingForm); the detail panel stays opaque. Best-effort calls.
     public static class Glass {
+        [StructLayout(LayoutKind.Sequential)] struct AccentPolicy { public int AccentState, AccentFlags, GradientColor, AnimationId; }
+        [StructLayout(LayoutKind.Sequential)] struct CompositionData { public int Attribute; public IntPtr Data; public int SizeOfData; }
+        [DllImport("user32.dll")] static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref CompositionData data);
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] static extern int SetWindowTheme(IntPtr hwnd, string app, string idList);
+
+        // Windows 10 1803+ and Windows 11 blur the desktop behind translucent pixels.
+        public static bool BlurSupported {
+            get { Version v = Environment.OSVersion.Version; return v.Major > 10 || (v.Major == 10 && v.Build >= 17134); }
+        }
+
+        // Only for per-pixel-alpha (UpdateLayeredWindow) windows. Returns whether Windows accepted it.
+        public static bool SetBlur(IntPtr handle, bool enabled) {
+            if (handle == IntPtr.Zero || !BlurSupported) return false;
+            var accent = new AccentPolicy { AccentState = enabled ? 3 : 0 }; // ACCENT_ENABLE_BLURBEHIND / DISABLED
+            int size = Marshal.SizeOf(accent);
+            IntPtr buffer = Marshal.AllocHGlobal(size);
+            try {
+                Marshal.StructureToPtr(accent, buffer, false);
+                var data = new CompositionData { Attribute = 19, Data = buffer, SizeOfData = size }; // WCA_ACCENT_POLICY
+                return SetWindowCompositionAttribute(handle, ref data) != 0;
+            } catch (Exception) {
+                return false;
+            } finally { Marshal.FreeHGlobal(buffer); }
+        }
 
         static void Attribute(IntPtr handle, int attribute, int value) {
             try { DwmSetWindowAttribute(handle, attribute, ref value, 4); } catch (Exception) { }
@@ -69,6 +93,43 @@ namespace CodexUsage {
         public static void EnableDpi() {
             try { if (SetThreadDpiAwarenessContext(new IntPtr(-4)) != IntPtr.Zero) return; } catch (EntryPointNotFoundException) { }
             try { SetProcessDPIAware(); } catch { }
+        }
+    }
+
+    // Alpha-correct text for 32-bit bitmaps. GDI (TextRenderer) cannot be used there because it
+    // writes alpha 0; GDI+ grayscale antialiasing keeps edges clean over a blurred backdrop.
+    public static class GlassText {
+        public static StringFormat Format(TextFormatFlags flags) {
+            var format = new StringFormat(StringFormatFlags.NoWrap | StringFormatFlags.NoClip);
+            format.Alignment = (flags & TextFormatFlags.HorizontalCenter) != 0 ? StringAlignment.Center : (flags & TextFormatFlags.Right) != 0 ? StringAlignment.Far : StringAlignment.Near;
+            format.LineAlignment = (flags & TextFormatFlags.VerticalCenter) != 0 ? StringAlignment.Center : (flags & TextFormatFlags.Bottom) != 0 ? StringAlignment.Far : StringAlignment.Near;
+            format.Trimming = (flags & TextFormatFlags.EndEllipsis) != 0 ? StringTrimming.EllipsisCharacter : StringTrimming.None;
+            format.HotkeyPrefix = System.Drawing.Text.HotkeyPrefix.None;
+            if ((flags & TextFormatFlags.EndEllipsis) != 0) format.FormatFlags &= ~StringFormatFlags.NoClip;
+            return format;
+        }
+        public static TextFormatFlags Flags(ContentAlignment align) {
+            TextFormatFlags flags = TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+            switch (align) {
+                case ContentAlignment.TopCenter: case ContentAlignment.MiddleCenter: case ContentAlignment.BottomCenter: flags |= TextFormatFlags.HorizontalCenter; break;
+                case ContentAlignment.TopRight: case ContentAlignment.MiddleRight: case ContentAlignment.BottomRight: flags |= TextFormatFlags.Right; break;
+            }
+            switch (align) {
+                case ContentAlignment.MiddleLeft: case ContentAlignment.MiddleCenter: case ContentAlignment.MiddleRight: flags |= TextFormatFlags.VerticalCenter; break;
+                case ContentAlignment.BottomLeft: case ContentAlignment.BottomCenter: case ContentAlignment.BottomRight: flags |= TextFormatFlags.Bottom; break;
+            }
+            return flags;
+        }
+        // Draws with GDI+ when alpha must be preserved, otherwise with GDI like ordinary controls.
+        public static void Draw(Graphics g, string text, Font font, Rectangle bounds, Color color, TextFormatFlags flags, bool alpha) {
+            if (string.IsNullOrEmpty(text) || color.A == 0 || bounds.Width <= 0 || bounds.Height <= 0) return;
+            if (!alpha) { TextRenderer.DrawText(g, text, font, bounds, color, flags); return; }
+            using (var format = Format(flags))
+            using (var brush = new SolidBrush(color)) g.DrawString(text, font, brush, bounds, format);
+        }
+        public static int Width(Graphics g, string text, Font font, TextFormatFlags flags, bool alpha) {
+            if (!alpha) return TextRenderer.MeasureText(g, text, font, new Size(Int32.MaxValue, Int32.MaxValue), flags).Width;
+            using (var format = Format(flags)) return (int)Math.Ceiling(g.MeasureString(text, font, PointF.Empty, format).Width);
         }
     }
 
@@ -153,17 +214,59 @@ namespace CodexUsage {
         }
     }
 
+    // The floating monitor. It is a per-pixel-alpha layered window: the whole window (frame
+    // and every child control) is painted with GDI+ into a 32-bit bitmap and handed to
+    // UpdateLayeredWindow, so translucent pixels really are translucent and Windows can blur
+    // the desktop behind them. Child controls still exist for layout, input and tooltips;
+    // Windows does not draw them, the form renders them itself.
     public class FloatingForm : DpiForm {
+        [StructLayout(LayoutKind.Sequential)] struct NativePoint { public int X, Y; }
+        [StructLayout(LayoutKind.Sequential)] struct NativeSize { public int Width, Height; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)] struct BlendFunction { public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat; }
+        [DllImport("user32.dll", SetLastError = true)] static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref NativePoint pptDst, ref NativeSize psize, IntPtr hdcSrc, ref NativePoint pptSrc, int crKey, ref BlendFunction pblend, int dwFlags);
+        [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
+        [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
+        [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+        [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
+        [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+        [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+
         int radius = 16;
-        public int Radius { get { return radius; } set { radius = Math.Max(1, value); UpdateRegion(); Invalidate(); } }
+        bool glassEnabled = true, renderQueued;
+        double opacity = 1.0;
+        float textDpi;
+        public int Radius { get { return radius; } set { radius = Math.Max(1, value); UpdateRegion(); RequestRender(); } }
         public Color BorderColor { get; set; }
         public Color AccentColor { get; set; }
-        public float HudUnit { get; set; }
-        bool glassEnabled;
         public Color HighlightColor { get; set; }
-        public FloatingForm() { DoubleBuffered = true; Radius = 16; HudUnit = 1f; BorderColor = Color.FromArgb(74, 74, 80); HighlightColor = Color.FromArgb(90, 255, 255, 255); AccentColor = Color.Empty; }
-        // Whether the owner shows this window translucent (see TrayApp.UpdateMonitorOpacity).
-        public bool GlassEnabled { get { return glassEnabled; } set { glassEnabled = value; } }
+        public float HudUnit { get; set; }
+        // Share of the base tone painted over the blurred desktop (0-255) while glass is on.
+        public int GlassTintAlpha { get; set; }
+        public int LayeredRenderCount { get; private set; }
+        public string LastLayeredError { get; private set; }
+        public bool BlurActive { get; private set; }
+
+        public FloatingForm() {
+            Radius = 16; HudUnit = 1f; GlassTintAlpha = 150; LastLayeredError = "";
+            BorderColor = Color.FromArgb(74, 74, 80); HighlightColor = Color.FromArgb(90, 255, 255, 255); AccentColor = Color.Empty;
+        }
+
+        // Translucent tinted background with the desktop blurred behind it; off = opaque.
+        public bool GlassEnabled {
+            get { return glassEnabled; }
+            set { glassEnabled = value; if (IsHandleCreated) BlurActive = Glass.SetBlur(Handle, value); RequestRender(); }
+        }
+
+        // Whole-window opacity (text included), applied by UpdateLayeredWindow. Hides Form.Opacity,
+        // whose SetLayeredWindowAttributes cannot be combined with UpdateLayeredWindow.
+        public new double Opacity {
+            get { return opacity; }
+            set { opacity = Math.Max(0, Math.Min(1, value)); RequestRender(); }
+        }
+
+        protected override CreateParams CreateParams {
+            get { CreateParams cp = base.CreateParams; cp.ExStyle |= 0x00080000; return cp; } // WS_EX_LAYERED
+        }
         protected override void CreateHandle() {
             // Windows expands a new top-level window to its minimum tracking
             // width. Restore the borderless client size before its first frame.
@@ -172,11 +275,42 @@ namespace CodexUsage {
             if (FormBorderStyle == FormBorderStyle.None && ClientSize != requestedSize)
                 ClientSize = requestedSize;
         }
+        protected override void OnHandleCreated(EventArgs e) {
+            base.OnHandleCreated(e);
+            BlurActive = Glass.SetBlur(Handle, glassEnabled);
+            RenderLayered();
+        }
         protected override void OnSizeChanged(EventArgs e) {
             base.OnSizeChanged(e);
             UpdateRegion();
+            RequestRender();
         }
+        protected override void OnLayout(LayoutEventArgs e) { base.OnLayout(e); RequestRender(); }
+        protected override void OnVisibleChanged(EventArgs e) { base.OnVisibleChanged(e); if (Visible) RenderLayered(); }
+        protected override void OnControlAdded(ControlEventArgs e) { base.OnControlAdded(e); Watch(e.Control); }
+
+        // Any visible change in the control tree schedules one coalesced re-render.
+        void Watch(Control control) {
+            EventHandler changed = delegate { RequestRender(); };
+            control.TextChanged += changed;
+            control.ForeColorChanged += changed;
+            control.FontChanged += changed;
+            control.VisibleChanged += changed;
+            control.SizeChanged += changed;
+            control.LocationChanged += changed;
+            control.Invalidated += delegate { RequestRender(); };
+            control.ControlAdded += delegate(object sender, ControlEventArgs e) { Watch(e.Control); };
+            foreach (Control child in control.Controls) Watch(child);
+        }
+
+        public void RequestRender() {
+            if (renderQueued || !IsHandleCreated || IsDisposed) return;
+            renderQueued = true;
+            BeginInvoke((MethodInvoker)delegate { renderQueued = false; RenderLayered(); });
+        }
+
         void UpdateRegion() {
+            // The region clips the blur to the rounded shape.
             if (Width < 2 || Height < 2) return;
             using (var path = Shapes.Round(new RectangleF(0, 0, Width, Height), Radius)) {
                 var old = Region;
@@ -184,9 +318,111 @@ namespace CodexUsage {
                 if (old != null) old.Dispose();
             }
         }
-        protected override void OnPaint(PaintEventArgs e) {
-            base.OnPaint(e);
-            Hud.GlassEdge(e.Graphics, new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), Radius, BorderColor, HighlightColor, Math.Max(0.5f, HudUnit));
+
+        float TextDpi {
+            get {
+                // Labels draw point-size fonts at the system DPI; match it so GDI+ text is the same size.
+                if (textDpi <= 0) { try { using (Graphics screen = Graphics.FromHwnd(IntPtr.Zero)) textDpi = screen.DpiY; } catch (Exception) { textDpi = 96; } }
+                return textDpi;
+            }
+        }
+
+        // The complete window image with real alpha (also used for smoke-test screenshots).
+        public Bitmap RenderComposite() {
+            var bitmap = new Bitmap(Math.Max(1, Width), Math.Max(1, Height), System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            bitmap.SetResolution(TextDpi, TextDpi);
+            using (Graphics g = Graphics.FromImage(bitmap)) {
+                g.Clear(Color.Transparent);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                g.CompositingQuality = CompositingQuality.HighQuality;
+                PaintFrame(g);
+                PaintChildren(g, this, Point.Empty);
+            }
+            return bitmap;
+        }
+
+        void PaintFrame(Graphics g) {
+            if (Width < 4 || Height < 4) return;
+            float unit = Math.Max(0.5f, HudUnit);
+            var bounds = new RectangleF(0, 0, Width, Height);
+            using (var path = Shapes.Round(bounds, Radius)) {
+                Color tint = glassEnabled ? Color.FromArgb(Math.Max(0, Math.Min(255, GlassTintAlpha)), BackColor) : BackColor;
+                using (var fill = new SolidBrush(tint)) g.FillPath(fill, path);
+                if (glassEnabled) {
+                    // Soft sheen on the upper half, as on a pane of glass catching light.
+                    using (var sheen = new LinearGradientBrush(new RectangleF(0, -1, Width, Height * 0.6f + 2), Color.FromArgb(26, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), LinearGradientMode.Vertical)) {
+                        Region old = g.Clip;
+                        g.SetClip(path, CombineMode.Intersect);
+                        g.FillRectangle(sheen, 0, 0, Width, Height * 0.6f);
+                        g.Clip = old;
+                    }
+                }
+            }
+            Color border = glassEnabled ? Color.FromArgb(52, 255, 255, 255) : BorderColor;
+            Hud.GlassEdge(g, new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), Radius, border, HighlightColor, unit);
+        }
+
+        // Control.Visible is false while the window itself is hidden; the control's own flag
+        // tells whether it will show (needed to render before the first Show and for screenshots).
+        static System.Reflection.MethodInfo getState;
+        static bool OwnVisible(Control control) {
+            if (control.Visible) return true;
+            try {
+                if (getState == null) getState = typeof(Control).GetMethod("GetState", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, null, new[] { typeof(int) }, null);
+                return getState != null && (bool)getState.Invoke(control, new object[] { 0x00000002 }); // STATE_VISIBLE
+            } catch (Exception) { return false; }
+        }
+
+        static void PaintChildren(Graphics g, Control parent, Point origin) {
+            // Reverse z-order: the last control in the collection is at the back.
+            for (int i = parent.Controls.Count - 1; i >= 0; i--) {
+                Control child = parent.Controls[i];
+                if (!OwnVisible(child) || child.Width <= 0 || child.Height <= 0) continue;
+                var at = new Point(origin.X + child.Left, origin.Y + child.Top);
+                GraphicsState state = g.Save();
+                try {
+                    g.TranslateTransform(at.X, at.Y);
+                    g.IntersectClip(new Rectangle(0, 0, child.Width, child.Height));
+                    var ring = child as QuotaRing;
+                    var split = child as SplitQuotaLabel;
+                    var label = child as Label;
+                    if (ring != null) ring.Render(g, true);
+                    else if (split != null) split.Render(g, true);
+                    else if (label != null) {
+                        Rectangle r = new Rectangle(label.Padding.Left, label.Padding.Top, label.Width - label.Padding.Horizontal, label.Height - label.Padding.Vertical);
+                        GlassText.Draw(g, label.Text, label.Font, r, label.ForeColor, GlassText.Flags(label.TextAlign), true);
+                    }
+                } finally { g.Restore(state); }
+                if (child.Controls.Count > 0) PaintChildren(g, child, at);
+            }
+        }
+
+        public void RenderLayered() {
+            if (!IsHandleCreated || IsDisposed || Width < 1 || Height < 1) return;
+            IntPtr screen = IntPtr.Zero, memory = IntPtr.Zero, hBitmap = IntPtr.Zero, previous = IntPtr.Zero;
+            try {
+                using (Bitmap bitmap = RenderComposite()) {
+                    screen = GetDC(IntPtr.Zero);
+                    memory = CreateCompatibleDC(screen);
+                    hBitmap = bitmap.GetHbitmap(Color.FromArgb(0)); // premultiplied 32-bit DIB
+                    previous = SelectObject(memory, hBitmap);
+                    var size = new NativeSize { Width = bitmap.Width, Height = bitmap.Height };
+                    var source = new NativePoint();
+                    var location = new NativePoint { X = Left, Y = Top };
+                    var blend = new BlendFunction { BlendOp = 0, BlendFlags = 0, SourceConstantAlpha = (byte)Math.Round(opacity * 255), AlphaFormat = 1 }; // AC_SRC_OVER, AC_SRC_ALPHA
+                    if (UpdateLayeredWindow(Handle, screen, ref location, ref size, memory, ref source, 0, ref blend, 2)) { // ULW_ALPHA
+                        LayeredRenderCount++;
+                        LastLayeredError = "";
+                    } else LastLayeredError = "UpdateLayeredWindow failed: " + Marshal.GetLastWin32Error();
+                }
+            } catch (Exception ex) {
+                LastLayeredError = ex.GetType().Name + ": " + ex.Message;
+            } finally {
+                if (memory != IntPtr.Zero) { if (previous != IntPtr.Zero) SelectObject(memory, previous); DeleteDC(memory); }
+                if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
+                if (screen != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screen);
+            }
         }
     }
 
@@ -207,23 +443,27 @@ namespace CodexUsage {
             TrackColor = Color.FromArgb(58, 58, 62);
             CaptionColor = Color.Empty;
         }
-        // Activity-ring style: a translucent full track with a smooth round-capped arc.
         protected override void OnPaint(PaintEventArgs e) {
             base.OnPaint(e);
+            Render(e.Graphics, false);
+        }
+        // Activity-ring style: a full track with a smooth round-capped arc. With alpha the
+        // track is translucent white so the blurred desktop shows through it.
+        public void Render(Graphics g, bool alpha) {
             float scale = Width / 52f;
             float diameter = 38 * scale;
             float stroke = 4.5f * scale;
             var ring = new RectangleF((Width - diameter) / 2, 5 * scale, diameter, diameter);
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
             bool known = Value >= 0 && !Double.IsNaN(Value) && !Double.IsInfinity(Value);
             Color fill = Stale ? Hud.Dim(FillColor, 150) : FillColor;
-            using (var track = new Pen(TrackColor, stroke)) e.Graphics.DrawEllipse(track, ring);
+            using (var track = new Pen(alpha ? Color.FromArgb(46, 255, 255, 255) : TrackColor, stroke)) g.DrawEllipse(track, ring);
             if (known && Value > 0) {
                 float sweep = (float)(Math.Min(100, Value) * 3.6);
                 using (var pen = new Pen(fill, stroke)) {
                     pen.StartCap = pen.EndCap = LineCap.Round;
-                    if (sweep >= 359.5f) e.Graphics.DrawEllipse(pen, ring);
-                    else e.Graphics.DrawArc(pen, ring, -90, Math.Max(0.5f, sweep));
+                    if (sweep >= 359.5f) g.DrawEllipse(pen, ring);
+                    else g.DrawArc(pen, ring, -90, Math.Max(0.5f, sweep));
                 }
             }
             string valueText = ValueText;
@@ -231,14 +471,14 @@ namespace CodexUsage {
             // applying the graphics device's DPI a second time to point fonts.
             using (var valueFont = new Font(NumberFont.Family, 10.5f * scale, NumberFont.Style(true), GraphicsUnit.Pixel))
             using (var captionFont = new Font("Microsoft YaHei UI", (28f / 3) * scale, FontStyle.Regular, GraphicsUnit.Pixel)) {
-                TextRenderer.DrawText(e.Graphics, valueText, valueFont, Rectangle.Round(ring), ForeColor,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                GlassText.Draw(g, valueText, valueFont, Rectangle.Round(ring), ForeColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding, alpha);
                 string[] lines = (Caption ?? "").Split(new char[] { '\n' }, 2);
                 var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
                     TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
                 for (int i = 0; i < lines.Length; i++)
-                    TextRenderer.DrawText(e.Graphics, lines[i], captionFont,
-                        new Rectangle(0, (int)((46 + 16 * i) * scale), Width, (int)(16 * scale)), CaptionColor.IsEmpty ? ForeColor : CaptionColor, flags);
+                    GlassText.Draw(g, lines[i], captionFont,
+                        new Rectangle(0, (int)((46 + 16 * i) * scale), Width, (int)(16 * scale)), CaptionColor.IsEmpty ? ForeColor : CaptionColor, flags, alpha);
             }
         }
     }
@@ -597,13 +837,16 @@ namespace CodexUsage {
         public SplitQuotaLabel() { DoubleBuffered = true; ResizeRedraw = true; AccountName = ""; FiveText = LongText = "—"; FiveColor = LongColor = Color.White; SeparatorColor = Color.Gray; }
         protected override void OnPaint(PaintEventArgs e) {
             base.OnPaint(e);
+            Render(e.Graphics, false);
+        }
+        public void Render(Graphics g, bool alpha) {
             var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
-            int separatorWidth = TextRenderer.MeasureText(e.Graphics, "/", Font, new Size(Int32.MaxValue, Height), flags).Width + Math.Max(4, Font.Height / 6);
+            int separatorWidth = GlassText.Width(g, "/", Font, flags, alpha) + Math.Max(4, Font.Height / 6);
             int nameWidth = Width * 32 / 100, valueWidth = Math.Max(0, (Width - nameWidth - separatorWidth) / 2);
-            TextRenderer.DrawText(e.Graphics, AccountName, Font, new Rectangle(0, 0, nameWidth, Height), ForeColor, flags);
-            TextRenderer.DrawText(e.Graphics, FiveText, Font, new Rectangle(nameWidth, 0, valueWidth, Height), FiveColor, flags);
-            TextRenderer.DrawText(e.Graphics, "/", Font, new Rectangle(nameWidth + valueWidth, 0, separatorWidth, Height), SeparatorColor, flags);
-            TextRenderer.DrawText(e.Graphics, LongText, Font, new Rectangle(nameWidth + valueWidth + separatorWidth, 0, valueWidth, Height), LongColor, flags);
+            GlassText.Draw(g, AccountName, Font, new Rectangle(0, 0, nameWidth, Height), ForeColor, flags, alpha);
+            GlassText.Draw(g, FiveText, Font, new Rectangle(nameWidth, 0, valueWidth, Height), FiveColor, flags, alpha);
+            GlassText.Draw(g, "/", Font, new Rectangle(nameWidth + valueWidth, 0, separatorWidth, Height), SeparatorColor, flags, alpha);
+            GlassText.Draw(g, LongText, Font, new Rectangle(nameWidth + valueWidth + separatorWidth, 0, valueWidth, Height), LongColor, flags, alpha);
         }
     }
 }

@@ -149,7 +149,7 @@ namespace CodexUsageDesktop {
         }
 
         void BuildBall() {
-            Ball = new FloatingForm { DisplayDpi = (int)(UiScale * 96), Text = "Codex + Claude 额度悬浮面板", AutoScaleMode = AutoScaleMode.None, FormBorderStyle = FormBorderStyle.None, ShowInTaskbar = false, TopMost = Settings.TopMost, StartPosition = FormStartPosition.Manual, BackColor = BallBack, BorderColor = BallBorder, AccentColor = AccentCodex, GlassEnabled = Settings.GlassEffect };
+            Ball = new FloatingForm { DisplayDpi = (int)(UiScale * 96), Text = "Codex + Claude 额度悬浮面板", AutoScaleMode = AutoScaleMode.None, FormBorderStyle = FormBorderStyle.None, ShowInTaskbar = false, TopMost = Settings.TopMost, StartPosition = FormStartPosition.Manual, BackColor = BallBack, BorderColor = BallBorder, AccentColor = AccentCodex, GlassEnabled = Settings.GlassEffect, GlassTintAlpha = GlassTintAlpha };
             Ball.Radius = U(14);
             Ball.ClientSize = new Size(U(320), U(142));
             Ball.Padding = new Padding(U(14), U(10), U(14), U(10));
