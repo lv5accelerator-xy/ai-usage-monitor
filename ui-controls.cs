@@ -33,33 +33,13 @@ namespace CodexUsage {
         }
     }
 
-    // Native frosted glass. Real blur comes from DWM (SetWindowCompositionAttribute
-    // blur-behind, Windows 10 1803+ / 11) under a uniformly translucent layered window,
-    // so GDI text keeps full colour while the desktop behind is blurred. Every call is
-    // best-effort: unsupported systems simply keep the opaque look.
+    // Native window chrome helpers. Real DWM blur-behind is deliberately not used: WinForms
+    // paints labels and backgrounds with GDI, which leaves the alpha channel at 0, so blur
+    // turned those pixels see-through (white cards, haloed text; seen in v2.2.0). The glass
+    // look comes from a uniformly translucent layered window instead. Calls are best-effort.
     public static class Glass {
-        [StructLayout(LayoutKind.Sequential)] struct AccentPolicy { public int AccentState, AccentFlags, GradientColor, AnimationId; }
-        [StructLayout(LayoutKind.Sequential)] struct CompositionData { public int Attribute; public IntPtr Data; public int SizeOfData; }
-        [DllImport("user32.dll")] static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref CompositionData data);
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] static extern int SetWindowTheme(IntPtr hwnd, string app, string idList);
-
-        public static bool Supported {
-            get { Version v = Environment.OSVersion.Version; return v.Major > 10 || (v.Major == 10 && v.Build >= 17134); }
-        }
-
-        public static void SetBlur(IntPtr handle, bool enabled) {
-            if (handle == IntPtr.Zero || !Supported) return;
-            var accent = new AccentPolicy { AccentState = enabled ? 3 : 0 }; // ACCENT_ENABLE_BLURBEHIND
-            int size = Marshal.SizeOf(accent);
-            IntPtr buffer = Marshal.AllocHGlobal(size);
-            try {
-                Marshal.StructureToPtr(accent, buffer, false);
-                var data = new CompositionData { Attribute = 19, Data = buffer, SizeOfData = size }; // WCA_ACCENT_POLICY
-                SetWindowCompositionAttribute(handle, ref data);
-            } catch (Exception) {
-            } finally { Marshal.FreeHGlobal(buffer); }
-        }
 
         static void Attribute(IntPtr handle, int attribute, int value) {
             try { DwmSetWindowAttribute(handle, attribute, ref value, 4); } catch (Exception) { }
@@ -182,12 +162,8 @@ namespace CodexUsage {
         bool glassEnabled;
         public Color HighlightColor { get; set; }
         public FloatingForm() { DoubleBuffered = true; Radius = 16; HudUnit = 1f; BorderColor = Color.FromArgb(74, 74, 80); HighlightColor = Color.FromArgb(90, 255, 255, 255); AccentColor = Color.Empty; }
-        // Blur the desktop behind the window; visible wherever Opacity is below 1.
-        public bool GlassEnabled { get { return glassEnabled; } set { glassEnabled = value; if (IsHandleCreated) Glass.SetBlur(Handle, value); } }
-        protected override void OnHandleCreated(EventArgs e) {
-            base.OnHandleCreated(e);
-            Glass.SetBlur(Handle, glassEnabled);
-        }
+        // Whether the owner shows this window translucent (see TrayApp.UpdateMonitorOpacity).
+        public bool GlassEnabled { get { return glassEnabled; } set { glassEnabled = value; } }
         protected override void CreateHandle() {
             // Windows expands a new top-level window to its minimum tracking
             // width. Restore the borderless client size before its first frame.

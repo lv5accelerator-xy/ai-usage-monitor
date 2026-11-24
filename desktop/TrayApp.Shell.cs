@@ -142,7 +142,6 @@ namespace CodexUsageDesktop {
             StatusLabel = NewLabel("", 9, true);
             StatusLabel.Padding = new Padding(U(20), 0, U(20), 0);
             root.Controls.Add(StatusLabel, 0, 2);
-            Popup.HandleCreated += delegate { Glass.SetBlur(Popup.Handle, Settings.GlassEffect); };
             Popup.ResizeEnd += delegate { SaveSettings(); };
             Popup.FormClosing += delegate(object s, FormClosingEventArgs e) {
                 if (!Exiting && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Popup.Hide(); SaveSettings(); }
