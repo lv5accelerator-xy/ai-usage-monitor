@@ -2,6 +2,13 @@
 
 原 README 顶部与中部的各版本说明，统一 README 版式时原样移至此处。逐项变化见 [CHANGELOG](../CHANGELOG.md)。
 
+## v2.2.0: frosted glass
+
+- **磨砂玻璃界面。** 悬浮窗与额度面板半透明，Windows 10 1803+ / Windows 11 会模糊背后的桌面；配色改用 macOS 深色模式系统色，卡片与悬浮窗大圆角、细描边、顶部高光。
+- **更柔和的控件。** 胶囊额度条、圆头连续圆环、圆角趋势柱、胶囊按钮、圆角蓝色高亮菜单；标题栏与滚动条跟随深色，Windows 11 上窗口与菜单为系统圆角。
+- **可关闭。** 右键 **磨砂玻璃效果**（默认开启），关闭后恢复完全不透明。
+- **iPhone 网页**同步换成玻璃材质。
+
 ## v2.1.0: beta channel and more reminders
 
 - **Beta channel.** Every new version is first published as a prerelease. Only clients with **客户端更新 → 接收测试版** enabled receive it. After testing, run the **Promote release to stable** GitHub Actions workflow (or ask for it) and all other clients update automatically. Friends stay on the stable channel by default.

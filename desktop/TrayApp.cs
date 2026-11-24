@@ -47,10 +47,14 @@ namespace CodexUsageDesktop {
 
         // ---------------------------------------------------------------- theme
         public static Color Html(string value) { return ColorTranslator.FromHtml(value); }
-        public readonly Color PopupBack = Html("#060A13"), CardBack = Html("#0B1322"), CardBorder = Html("#1A2B45"), TextPrimary = Html("#E4F3FF"),
-            TextMuted = Html("#7D8FAD"), Danger = Html("#FF4D6D"), Warning = Html("#FFB547"), Good = Html("#22E3FF"), Track = Html("#14223A"),
-            ButtonBack = Html("#0C1A2E"), ButtonBorder = Html("#1E5A78"), ButtonHover = Html("#123150"), BallBack = Html("#070D18"), BallBorder = Html("#173352"),
-            AccentCodex = Html("#22E3FF"), AccentClaude = Html("#B58CFF"), Caption = Html("#4F86B0");
+        // Apple dark-mode materials and system colours. Windows are translucent and the
+        // desktop behind them is blurred (see Glass); these are the opaque base tones.
+        public readonly Color PopupBack = Html("#1C1C1E"), CardBack = Html("#2C2C2E"), CardBorder = Html("#3A3A3C"), TextPrimary = Html("#F5F5F7"),
+            TextMuted = Html("#98989F"), Danger = Html("#FF453A"), Warning = Html("#FF9F0A"), Good = Html("#30D158"), Track = Html("#3A3A3E"),
+            ButtonBack = Html("#3A3A3C"), ButtonBorder = Html("#48484A"), ButtonHover = Html("#48484A"), BallBack = Html("#1E1E21"), BallBorder = Html("#4A4A50"),
+            AccentCodex = Html("#409CFF"), AccentClaude = Html("#BF5AF2"), Caption = Html("#8E8E93"), MenuSelect = Html("#0A84FF");
+        // Window opacity while the frosted-glass effect is on: the share of the base tone over the blurred desktop.
+        public const double GlassMonitorOpacity = 0.86, GlassPanelOpacity = 0.92;
         readonly Dictionary<string, Font> fonts = new Dictionary<string, Font>();
 
         // ---------------------------------------------------------------- controls
@@ -73,7 +77,7 @@ namespace CodexUsageDesktop {
         public readonly List<CardState> CardStates = new List<CardState>();
         public readonly Dictionary<string, ToolStripMenuItem> SizeItems = new Dictionary<string, ToolStripMenuItem>();
         public readonly List<ToolStripMenuItem> ThresholdItems = new List<ToolStripMenuItem>();
-        public ToolStripMenuItem ItemCompact, ItemRings, ItemClear, ItemSnap, ItemNotifications, ItemBallVisible, ItemTopMost, ItemStartup, ItemFullscreen, ClientStatusItem, CheckUpdateItem, RestartUpdateItem, ItemRecovery, ItemFailure, ItemBeta;
+        public ToolStripMenuItem ItemCompact, ItemRings, ItemClear, ItemGlass, ItemSnap, ItemNotifications, ItemBallVisible, ItemTopMost, ItemStartup, ItemFullscreen, ClientStatusItem, CheckUpdateItem, RestartUpdateItem, ItemRecovery, ItemFailure, ItemBeta;
         public TrackBar OpacitySlider;
         Label opacityLabel;
         public System.Windows.Forms.Timer HoverTimer, StatusTimer, PollTimer, PeriodicTimer, InitialTimer, ClientTimer;
@@ -114,7 +118,8 @@ namespace CodexUsageDesktop {
             string key = size.ToString(J.Inv) + "/" + bold + "/" + mono;
             Font font;
             if (!fonts.TryGetValue(key, out font)) {
-                font = new Font(mono ? MonoFont.Family : "Microsoft YaHei UI", size, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Point);
+                font = mono ? new Font(NumberFont.Family, size, NumberFont.Style(bold), GraphicsUnit.Point)
+                    : new Font("Microsoft YaHei UI", size, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Point);
                 fonts[key] = font;
             }
             return font;
@@ -136,10 +141,7 @@ namespace CodexUsageDesktop {
         public static void AddPercentColumns(TableLayoutPanel grid, params float[] widths) { foreach (float w in widths) grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, w)); }
 
         public Button NewButton(string text) {
-            var button = new Button { Text = text, Dock = DockStyle.Fill, Font = UiFont(9), FlatStyle = FlatStyle.Flat, BackColor = ButtonBack, ForeColor = AccentCodex, Cursor = Cursors.Hand, Margin = new Padding(0) };
-            button.FlatAppearance.BorderColor = ButtonBorder;
-            button.FlatAppearance.MouseOverBackColor = ButtonHover;
-            button.FlatAppearance.MouseDownBackColor = ButtonBorder;
+            var button = new PillButton { Text = text, Dock = DockStyle.Fill, Font = UiFont(9), BackColor = ButtonBack, FillColor = ButtonBack, HoverColor = ButtonHover, PressedColor = Html("#545458"), ForeColor = AccentCodex, Cursor = Cursors.Hand, Margin = new Padding(0, U(2), 0, U(2)) };
             return button;
         }
 
@@ -261,7 +263,7 @@ namespace CodexUsageDesktop {
             UpdateBallChrome();
         }
 
-        void UpdateBallChrome() { Ball.Radius = B(10); Ball.HudUnit = (float)(B(100) / 100.0); }
+        void UpdateBallChrome() { Ball.Radius = B(14); Ball.HudUnit = (float)(B(100) / 100.0); }
 
         public void RememberMonitorPosition() {
             int x = Ball.Left, y = Ball.Top;
@@ -272,10 +274,25 @@ namespace CodexUsageDesktop {
             RestLocation = new Point(x, y);
         }
 
+        // Baseline opacity of the floating monitor: translucent over the blurred desktop
+        // with the glass effect, otherwise fully opaque.
+        public double MonitorSolidOpacity { get { return Settings.GlassEffect ? GlassMonitorOpacity : 1.0; } }
+
         public void UpdateMonitorOpacity() {
             // Windows applies opacity to the whole compact window, including text.
-            Ball.Opacity = MonitorExpanded || Settings.ClearMode ? 1.0 : Settings.CompactOpacity / 100.0;
+            double solid = MonitorSolidOpacity;
+            Ball.Opacity = MonitorExpanded || Settings.ClearMode ? solid : Math.Min(solid, Settings.CompactOpacity / 100.0);
             if (OpacitySlider != null) OpacitySlider.Enabled = !Settings.ClearMode;
+        }
+
+        public void ApplyGlassEffect() {
+            bool glass = Settings.GlassEffect;
+            Ball.GlassEnabled = glass;
+            UpdateMonitorOpacity();
+            if (Popup != null) {
+                Popup.Opacity = glass ? GlassPanelOpacity : 1.0;
+                if (Popup.IsHandleCreated) Glass.SetBlur(Popup.Handle, glass);
+            }
         }
 
         Point DockedLocation(Point rest) {

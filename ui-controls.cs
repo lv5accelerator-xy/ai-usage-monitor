@@ -12,18 +12,75 @@ namespace CodexUsage {
             return Math.Round(Math.Min(100, value), 0, MidpointRounding.AwayFromZero).ToString(System.Globalization.CultureInfo.InvariantCulture) + "%";
         }
     }
-    // Monospace digits for the instrument look; Consolas ships with every Windows.
-    public static class MonoFont {
+    // Figures use Segoe UI Semibold (tabular digits by default), the closest Windows
+    // counterpart to SF Pro's numerals; older systems fall back to Segoe UI or Tahoma.
+    public static class NumberFont {
         static string family;
         public static string Family {
             get {
                 if (family != null) return family;
-                foreach (string name in new[] { "Cascadia Mono", "Cascadia Code", "Consolas" }) {
+                foreach (string name in new[] { "Segoe UI Semibold", "Segoe UI", "Tahoma" }) {
                     try { using (var f = new FontFamily(name)) { family = f.Name; return family; } } catch (ArgumentException) { }
                 }
-                family = FontFamily.GenericMonospace.Name;
+                family = FontFamily.GenericSansSerif.Name;
                 return family;
             }
+        }
+        // The Semibold family already carries the weight; synthetic bold on top looks heavy.
+        public static FontStyle Style(bool bold) {
+            if (Family.EndsWith("Semibold", StringComparison.OrdinalIgnoreCase)) return FontStyle.Regular;
+            return bold ? FontStyle.Bold : FontStyle.Regular;
+        }
+    }
+
+    // Native frosted glass. Real blur comes from DWM (SetWindowCompositionAttribute
+    // blur-behind, Windows 10 1803+ / 11) under a uniformly translucent layered window,
+    // so GDI text keeps full colour while the desktop behind is blurred. Every call is
+    // best-effort: unsupported systems simply keep the opaque look.
+    public static class Glass {
+        [StructLayout(LayoutKind.Sequential)] struct AccentPolicy { public int AccentState, AccentFlags, GradientColor, AnimationId; }
+        [StructLayout(LayoutKind.Sequential)] struct CompositionData { public int Attribute; public IntPtr Data; public int SizeOfData; }
+        [DllImport("user32.dll")] static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref CompositionData data);
+        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] static extern int SetWindowTheme(IntPtr hwnd, string app, string idList);
+
+        public static bool Supported {
+            get { Version v = Environment.OSVersion.Version; return v.Major > 10 || (v.Major == 10 && v.Build >= 17134); }
+        }
+
+        public static void SetBlur(IntPtr handle, bool enabled) {
+            if (handle == IntPtr.Zero || !Supported) return;
+            var accent = new AccentPolicy { AccentState = enabled ? 3 : 0 }; // ACCENT_ENABLE_BLURBEHIND
+            int size = Marshal.SizeOf(accent);
+            IntPtr buffer = Marshal.AllocHGlobal(size);
+            try {
+                Marshal.StructureToPtr(accent, buffer, false);
+                var data = new CompositionData { Attribute = 19, Data = buffer, SizeOfData = size }; // WCA_ACCENT_POLICY
+                SetWindowCompositionAttribute(handle, ref data);
+            } catch (Exception) {
+            } finally { Marshal.FreeHGlobal(buffer); }
+        }
+
+        static void Attribute(IntPtr handle, int attribute, int value) {
+            try { DwmSetWindowAttribute(handle, attribute, ref value, 4); } catch (Exception) { }
+        }
+
+        // Dark title bar whose caption blends into the window background (Windows 11).
+        public static void DarkChrome(IntPtr handle, Color caption, Color border) {
+            if (handle == IntPtr.Zero) return;
+            Attribute(handle, 20, 1); // DWMWA_USE_IMMERSIVE_DARK_MODE
+            Attribute(handle, 19, 1); // same attribute on Windows 10 1809-1909
+            Attribute(handle, 35, ColorTranslator.ToWin32(caption)); // DWMWA_CAPTION_COLOR
+            Attribute(handle, 34, ColorTranslator.ToWin32(border)); // DWMWA_BORDER_COLOR
+        }
+
+        // Windows 11 rounds the window (and its shadow) itself; earlier systems ignore this.
+        public static void RoundCorners(IntPtr handle, bool small) {
+            if (handle != IntPtr.Zero) Attribute(handle, 33, small ? 3 : 2); // DWMWA_WINDOW_CORNER_PREFERENCE
+        }
+
+        public static void DarkScrollBar(Control control) {
+            try { if (control != null && control.IsHandleCreated) SetWindowTheme(control.Handle, "DarkMode_Explorer", null); } catch (Exception) { }
         }
     }
     public static class NativeDisplay {
@@ -49,27 +106,31 @@ namespace CodexUsage {
         }
     }
 
-    // Sci-fi HUD details shared by cards and the floating monitor.
+    // Glass details shared by cards and the floating monitor.
     public static class Hud {
-        public static void Brackets(Graphics g, RectangleF r, Color color, float length, float width) {
-            if (color.IsEmpty || color.A == 0 || r.Width < length * 2 || r.Height < length * 2) return;
-            using (var pen = new Pen(color, width)) {
-                pen.StartCap = pen.EndCap = LineCap.Square;
-                float l = r.Left, t = r.Top, rt = r.Right, b = r.Bottom;
-                g.DrawLines(pen, new[] { new PointF(l, t + length), new PointF(l, t), new PointF(l + length, t) });
-                g.DrawLines(pen, new[] { new PointF(rt - length, t), new PointF(rt, t), new PointF(rt, t + length) });
-                g.DrawLines(pen, new[] { new PointF(rt, b - length), new PointF(rt, b), new PointF(rt - length, b) });
-                g.DrawLines(pen, new[] { new PointF(l + length, b), new PointF(l, b), new PointF(l, b - length) });
+        // Hairline outline plus a specular highlight along the top edge, the way light
+        // catches the rim of a pane of frosted glass. Drawn over an opaque fill.
+        public static void GlassEdge(Graphics g, RectangleF bounds, float radius, Color border, Color highlight, float unit) {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Shapes.Round(bounds, radius))
+            using (var pen = new Pen(border, Math.Max(1f, unit * 0.75f))) g.DrawPath(pen, path);
+            if (highlight.IsEmpty || highlight.A == 0 || bounds.Width < radius * 2 + 8) return;
+            float y = bounds.Top + Math.Max(1f, unit);
+            var line = new RectangleF(bounds.Left + radius * 0.6f, y, bounds.Width - radius * 1.2f, Math.Max(1f, unit * 0.75f));
+            using (var brush = new LinearGradientBrush(new RectangleF(line.Left - 1, line.Top, line.Width + 2, line.Height + 1), Color.Transparent, Color.Transparent, LinearGradientMode.Horizontal)) {
+                var blend = new ColorBlend {
+                    Colors = new[] { Dim(highlight, 0), highlight, highlight, Dim(highlight, 0) },
+                    Positions = new[] { 0f, 0.25f, 0.75f, 1f }
+                };
+                brush.InterpolationColors = blend;
+                g.FillRectangle(brush, line);
             }
         }
-        // Thin glowing accent line fading out to the right.
-        public static void TopLine(Graphics g, RectangleF r, Color color, float width) {
-            if (color.IsEmpty || color.A == 0 || r.Width < 4) return;
-            var line = new RectangleF(r.Left, r.Top, r.Width * 0.55f, Math.Max(1, width));
-            using (var brush = new LinearGradientBrush(new RectangleF(line.Left - 1, line.Top, line.Width + 2, line.Height), Color.FromArgb(220, color), Color.FromArgb(0, color), LinearGradientMode.Horizontal))
-                g.FillRectangle(brush, line);
-        }
         public static Color Dim(Color color, int alpha) { return Color.FromArgb(Math.Max(0, Math.Min(255, alpha)), color); }
+        public static Color Mix(Color a, Color b, double t) {
+            t = Math.Max(0, Math.Min(1, t));
+            return Color.FromArgb((int)Math.Round(a.R + (b.R - a.R) * t), (int)Math.Round(a.G + (b.G - a.G) * t), (int)Math.Round(a.B + (b.B - a.B) * t));
+        }
     }
 
     public class Surface : Panel {
@@ -82,22 +143,24 @@ namespace CodexUsage {
             DoubleBuffered = true;
             ResizeRedraw = true;
             Radius = 12;
-            BorderColor = Color.FromArgb(52, 55, 64);
+            BorderColor = Color.FromArgb(58, 58, 62);
+            HighlightColor = Color.FromArgb(70, 255, 255, 255);
             AccentColor = Color.Empty;
+        }
+        public Color HighlightColor { get; set; }
+        protected override void OnPaintBackground(PaintEventArgs e) {
+            // Corners outside the rounded region belong to the parent surface.
+            if (Parent != null) using (var back = new SolidBrush(Parent.BackColor)) e.Graphics.FillRectangle(back, ClientRectangle);
+            if (Width < 2 || Height < 2) return;
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Shapes.Round(new RectangleF(0, 0, Width, Height), Radius))
+            using (var fill = new SolidBrush(BackColor)) e.Graphics.FillPath(fill, path);
         }
         protected override void OnPaint(PaintEventArgs e) {
             base.OnPaint(e);
             if (Width < 2 || Height < 2) return;
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            var bounds = new RectangleF(0.5f, 0.5f, Width - 1, Height - 1);
-            using (var path = Shapes.Round(bounds, Radius))
-            using (var pen = new Pen(BorderColor)) e.Graphics.DrawPath(pen, path);
-            if (!AccentColor.IsEmpty) {
-                float unit = Math.Max(0.5f, HudUnit);
-                e.Graphics.SmoothingMode = SmoothingMode.None;
-                Hud.Brackets(e.Graphics, new RectangleF(1, 1, Width - 3, Height - 3), Hud.Dim(AccentColor, 200), 12 * unit, 2 * unit);
-                Hud.TopLine(e.Graphics, new RectangleF(Radius + 14 * unit, 1, Width - 2 * Radius - 28 * unit, 2 * unit), AccentColor, 1.5f * unit);
-            }
+            float unit = Math.Max(0.5f, HudUnit);
+            Hud.GlassEdge(e.Graphics, new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), Radius, BorderColor, HighlightColor, unit);
         }
         protected override void OnSizeChanged(EventArgs e) {
             base.OnSizeChanged(e);
@@ -116,7 +179,15 @@ namespace CodexUsage {
         public Color BorderColor { get; set; }
         public Color AccentColor { get; set; }
         public float HudUnit { get; set; }
-        public FloatingForm() { DoubleBuffered = true; Radius = 16; HudUnit = 1f; BorderColor = Color.FromArgb(65, 68, 78); AccentColor = Color.Empty; }
+        bool glassEnabled;
+        public Color HighlightColor { get; set; }
+        public FloatingForm() { DoubleBuffered = true; Radius = 16; HudUnit = 1f; BorderColor = Color.FromArgb(74, 74, 80); HighlightColor = Color.FromArgb(90, 255, 255, 255); AccentColor = Color.Empty; }
+        // Blur the desktop behind the window; visible wherever Opacity is below 1.
+        public bool GlassEnabled { get { return glassEnabled; } set { glassEnabled = value; if (IsHandleCreated) Glass.SetBlur(Handle, value); } }
+        protected override void OnHandleCreated(EventArgs e) {
+            base.OnHandleCreated(e);
+            Glass.SetBlur(Handle, glassEnabled);
+        }
         protected override void CreateHandle() {
             // Windows expands a new top-level window to its minimum tracking
             // width. Restore the borderless client size before its first frame.
@@ -139,15 +210,7 @@ namespace CodexUsage {
         }
         protected override void OnPaint(PaintEventArgs e) {
             base.OnPaint(e);
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = Shapes.Round(new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), Radius))
-            using (var pen = new Pen(BorderColor)) e.Graphics.DrawPath(pen, path);
-            if (!AccentColor.IsEmpty) {
-                float unit = Math.Max(0.5f, HudUnit);
-                e.Graphics.SmoothingMode = SmoothingMode.None;
-                float inset = Math.Max(2f, Radius * 0.3f);
-                Hud.Brackets(e.Graphics, new RectangleF(inset, inset, Width - 1 - 2 * inset, Height - 1 - 2 * inset), Hud.Dim(AccentColor, 170), Math.Min(10 * unit, Height / 4f), 1.5f * unit);
-            }
+            Hud.GlassEdge(e.Graphics, new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), Radius, BorderColor, HighlightColor, Math.Max(0.5f, HudUnit));
         }
     }
 
@@ -164,44 +227,33 @@ namespace CodexUsage {
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             Value = -1;
             Caption = "";
-            FillColor = Color.FromArgb(138, 158, 214);
-            TrackColor = Color.FromArgb(52, 55, 64);
+            FillColor = Color.FromArgb(64, 156, 255);
+            TrackColor = Color.FromArgb(58, 58, 62);
             CaptionColor = Color.Empty;
         }
-        // 30 segments of 9 degrees with 3-degree gaps; lit segments glow softly.
-        const int Segments = 30;
+        // Activity-ring style: a translucent full track with a smooth round-capped arc.
         protected override void OnPaint(PaintEventArgs e) {
             base.OnPaint(e);
             float scale = Width / 52f;
-            float diameter = 40 * scale;
-            float stroke = 3 * scale;
-            var ring = new RectangleF((Width - diameter) / 2, 4 * scale, diameter, diameter);
+            float diameter = 38 * scale;
+            float stroke = 4.5f * scale;
+            var ring = new RectangleF((Width - diameter) / 2, 5 * scale, diameter, diameter);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             bool known = Value >= 0 && !Double.IsNaN(Value) && !Double.IsInfinity(Value);
-            double lit = known ? Math.Min(100, Value) / 100.0 * Segments : 0;
-            float step = 360f / Segments, sweep = step - 3f;
+            Color fill = Stale ? Hud.Dim(FillColor, 150) : FillColor;
+            using (var track = new Pen(TrackColor, stroke)) e.Graphics.DrawEllipse(track, ring);
             if (known && Value > 0) {
-                // Soft outer glow behind the lit arc.
-                using (var glow = new Pen(Hud.Dim(FillColor, Stale ? 25 : 55), stroke * 2.6f))
-                    e.Graphics.DrawArc(glow, ring, -90, (float)(Math.Min(100, Value) * 3.6));
-            }
-            using (var track = new Pen(TrackColor, stroke))
-            using (var pen = new Pen(Stale ? Hud.Dim(FillColor, 150) : FillColor, stroke)) {
-                for (int i = 0; i < Segments; i++) {
-                    float start = -90 + i * step + 1.5f;
-                    e.Graphics.DrawArc(track, ring, start, sweep);
-                    if (i < Math.Floor(lit)) e.Graphics.DrawArc(pen, ring, start, sweep);
-                    else if (i < lit) e.Graphics.DrawArc(pen, ring, start, (float)(sweep * (lit - i)));
+                float sweep = (float)(Math.Min(100, Value) * 3.6);
+                using (var pen = new Pen(fill, stroke)) {
+                    pen.StartCap = pen.EndCap = LineCap.Round;
+                    if (sweep >= 359.5f) e.Graphics.DrawEllipse(pen, ring);
+                    else e.Graphics.DrawArc(pen, ring, -90, Math.Max(0.5f, sweep));
                 }
             }
-            // Inner hairline for an instrument-dial look.
-            float inner = stroke * 2.2f;
-            using (var hair = new Pen(Hud.Dim(TrackColor, 160), Math.Max(1f, scale * 0.6f)))
-                e.Graphics.DrawEllipse(hair, RectangleF.Inflate(ring, -inner, -inner));
             string valueText = ValueText;
             // Bounds already contain the monitor scale. Pixel fonts avoid
             // applying the graphics device's DPI a second time to point fonts.
-            using (var valueFont = new Font(MonoFont.Family, 11.5f * scale, FontStyle.Bold, GraphicsUnit.Pixel))
+            using (var valueFont = new Font(NumberFont.Family, 10.5f * scale, NumberFont.Style(true), GraphicsUnit.Pixel))
             using (var captionFont = new Font("Microsoft YaHei UI", (28f / 3) * scale, FontStyle.Regular, GraphicsUnit.Pixel)) {
                 TextRenderer.DrawText(e.Graphics, valueText, valueFont, Rectangle.Round(ring), ForeColor,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
@@ -222,29 +274,28 @@ namespace CodexUsage {
         public QuotaBar() {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            FillColor = Color.FromArgb(138, 158, 214);
-            TrackColor = Color.FromArgb(48, 51, 60);
+            FillColor = Color.FromArgb(64, 156, 255);
+            TrackColor = Color.FromArgb(58, 58, 62);
         }
-        // Segmented "LED" meter: fixed-width cells with gaps, partial last cell.
+        // Capsule meter: rounded track with a rounded fill and a soft top sheen.
         protected override void OnPaint(PaintEventArgs e) {
             base.OnPaint(e);
             if (Width < 2 || Height < 2) return;
-            e.Graphics.SmoothingMode = SmoothingMode.None;
-            float gap = Math.Max(2f, Height / 3f);
-            int count = Math.Max(8, (int)Math.Round((Width + gap) / (Height * 1.8f + gap)));
-            float cell = (Width - gap * (count - 1)) / count;
-            double filled = Math.Max(0, Math.Min(100, Value)) / 100.0 * count;
-            using (var track = new SolidBrush(TrackColor))
-            using (var fill = new SolidBrush(FillColor))
-            using (var shine = new SolidBrush(Color.FromArgb(90, Color.White))) {
-                for (int i = 0; i < count; i++) {
-                    var r = new RectangleF(i * (cell + gap), 0, cell, Height);
-                    e.Graphics.FillRectangle(track, r);
-                    if (i >= filled) continue;
-                    var lit = new RectangleF(r.Left, 0, (float)(cell * Math.Min(1, filled - i)), Height);
-                    e.Graphics.FillRectangle(fill, lit);
-                    if (Height >= 4) e.Graphics.FillRectangle(shine, new RectangleF(lit.Left, 0, lit.Width, 1));
-                }
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            float h = Height, r = h / 2f;
+            using (var back = new SolidBrush(Parent != null ? Parent.BackColor : BackColor)) e.Graphics.FillRectangle(back, ClientRectangle);
+            using (var trackPath = Shapes.Round(new RectangleF(0, 0, Width, h), r))
+            using (var track = new SolidBrush(TrackColor)) e.Graphics.FillPath(track, trackPath);
+            double value = Math.Max(0, Math.Min(100, Value));
+            if (value <= 0) return;
+            // Keep a visible pill even for tiny values.
+            float w = Math.Max(h, (float)(Width * value / 100.0));
+            var lit = new RectangleF(0, 0, w, h);
+            using (var path = Shapes.Round(lit, r)) {
+                using (var fill = new LinearGradientBrush(new RectangleF(0, 0, Math.Max(2, w), h), Hud.Mix(FillColor, Color.White, 0.18), FillColor, LinearGradientMode.Horizontal))
+                    e.Graphics.FillPath(fill, path);
+                if (h >= 4) using (var shine = new LinearGradientBrush(new RectangleF(0, 0, w, h + 1), Color.FromArgb(70, Color.White), Color.FromArgb(0, Color.White), LinearGradientMode.Vertical))
+                    e.Graphics.FillPath(shine, path);
             }
         }
     }
@@ -323,6 +374,12 @@ namespace CodexUsage {
         public event EventHandler DisplayEnvironmentChanged;
         public bool LastChangeWasResume { get; private set; }
         public DpiForm() { DisplayDpi = 96; AutoScaleMode = AutoScaleMode.None; }
+        protected override void OnHandleCreated(EventArgs e) {
+            base.OnHandleCreated(e);
+            // Every app window is dark; match the title bar and use Windows 11 rounded corners.
+            Glass.DarkChrome(Handle, BackColor, Color.FromArgb(58, 58, 62));
+            Glass.RoundCorners(Handle, false);
+        }
         static Padding ResizePadding(Padding p, float factor) { return new Padding((int)Math.Round(p.Left * factor), (int)Math.Round(p.Top * factor), (int)Math.Round(p.Right * factor), (int)Math.Round(p.Bottom * factor)); }
         readonly System.Collections.Generic.Dictionary<string, Font> dpiFonts = new System.Collections.Generic.Dictionary<string, Font>();
         void ScaleTree(Control control, float factor) {
@@ -402,9 +459,9 @@ namespace CodexUsage {
         public UsageSparkline() {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BarColor = Color.FromArgb(34, 227, 255);
-            TrackColor = Color.FromArgb(20, 34, 58);
-            CaptionColor = Color.FromArgb(79, 134, 176);
+            BarColor = Color.FromArgb(64, 156, 255);
+            TrackColor = Color.FromArgb(58, 58, 62);
+            CaptionColor = Color.FromArgb(142, 142, 147);
             HighlightIndex = -1;
         }
         public double[] Values { get { return values; } }
@@ -420,25 +477,24 @@ namespace CodexUsage {
             if (count == 0 || Width < 8 || Height < 12) return;
             float captionHeight = Math.Max(10f, Height * 0.3f);
             float chartHeight = Height - captionHeight - 2;
-            float gap = Math.Max(3f, Width / (count * 6f));
+            float gap = Math.Max(3f, Width / (count * 2.2f));
             float bar = (Width - gap * (count - 1)) / count;
             double max = 0;
             foreach (double v in values) if (!Double.IsNaN(v) && v > max) max = v;
-            e.Graphics.SmoothingMode = SmoothingMode.None;
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            float radius = Math.Min(bar / 2f, 4f);
             using (var track = new SolidBrush(TrackColor))
-            using (var dim = new SolidBrush(Hud.Dim(BarColor, 120)))
+            using (var dim = new SolidBrush(Hud.Dim(BarColor, 110)))
             using (var bright = new SolidBrush(BarColor))
-            using (var glow = new SolidBrush(Hud.Dim(BarColor, 45)))
             using (var font = new Font("Microsoft YaHei UI", Math.Max(7f, captionHeight * 0.78f), FontStyle.Regular, GraphicsUnit.Pixel)) {
                 for (int i = 0; i < count; i++) {
                     float x = i * (bar + gap);
-                    e.Graphics.FillRectangle(track, x, 0, bar, chartHeight);
+                    using (var path = Shapes.Round(new RectangleF(x, 0, bar, chartHeight), radius)) e.Graphics.FillPath(track, path);
                     double v = values[i];
                     if (max > 0 && v > 0 && !Double.IsNaN(v)) {
-                        float h = Math.Max(2f, (float)(chartHeight * v / max));
+                        float h = Math.Min(chartHeight, Math.Max(radius * 2 + 1, (float)(chartHeight * v / max)));
                         bool today = i == HighlightIndex;
-                        if (today) e.Graphics.FillRectangle(glow, x - 2, chartHeight - h - 2, bar + 4, h + 2);
-                        e.Graphics.FillRectangle(today ? bright : dim, x, chartHeight - h, bar, h);
+                        using (var path = Shapes.Round(new RectangleF(x, chartHeight - h, bar, h), radius)) e.Graphics.FillPath(today ? bright : dim, path);
                     }
                     if (i < labels.Length && !string.IsNullOrEmpty(labels[i]))
                         TextRenderer.DrawText(e.Graphics, labels[i], font, new Rectangle((int)x - 4, (int)(chartHeight + 2), (int)bar + 8, (int)captionHeight),
@@ -448,7 +504,7 @@ namespace CodexUsage {
         }
     }
 
-    // Dark HUD context menu: navy surface, cyan selection and check marks.
+    // macOS-style dark menu: glass-grey surface, rounded blue selection with white text.
     public sealed class HudColorTable : ProfessionalColorTable {
         readonly Color back, border, select;
         public HudColorTable(Color back, Color border, Color select) { this.back = back; this.border = border; this.select = select; UseSystemColors = false; }
@@ -457,7 +513,7 @@ namespace CodexUsage {
         public override Color ImageMarginGradientMiddle { get { return back; } }
         public override Color ImageMarginGradientEnd { get { return back; } }
         public override Color MenuBorder { get { return border; } }
-        public override Color MenuItemBorder { get { return border; } }
+        public override Color MenuItemBorder { get { return select; } }
         public override Color MenuItemSelected { get { return select; } }
         public override Color MenuItemSelectedGradientBegin { get { return select; } }
         public override Color MenuItemSelectedGradientEnd { get { return select; } }
@@ -470,17 +526,36 @@ namespace CodexUsage {
         public override Color CheckPressedBackground { get { return select; } }
     }
     public sealed class HudMenuRenderer : ToolStripProfessionalRenderer {
-        readonly Color text, muted, accent;
+        readonly Color border, select, text, muted, accent;
         public HudMenuRenderer(Color back, Color border, Color select, Color text, Color muted, Color accent) : base(new HudColorTable(back, border, select)) {
-            this.text = text; this.muted = muted; this.accent = accent;
+            this.border = border; this.select = select; this.text = text; this.muted = muted; this.accent = accent;
             RoundedEdges = false;
         }
+        static bool Highlighted(ToolStripItem item) { return item.Enabled && (item.Selected || item.Pressed); }
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e) {
+            if (!Highlighted(e.Item)) return;
+            var r = new RectangleF(4, 1, e.Item.Width - 8, e.Item.Height - 2);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Shapes.Round(r, Math.Min(6f, r.Height / 2f)))
+            using (var brush = new SolidBrush(select)) e.Graphics.FillPath(brush, path);
+        }
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e) {
+            int y = e.Item.Height / 2;
+            using (var pen = new Pen(border)) e.Graphics.DrawLine(pen, 10, y, e.Item.Width - 10, y);
+        }
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e) {
+            if (e.ToolStrip is ToolStripDropDown) {
+                using (var pen = new Pen(border)) e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+                return;
+            }
+            base.OnRenderToolStripBorder(e);
+        }
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e) {
-            e.TextColor = e.Item.Enabled ? text : muted;
+            e.TextColor = !e.Item.Enabled ? muted : Highlighted(e.Item) ? Color.White : text;
             base.OnRenderItemText(e);
         }
         protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e) {
-            e.ArrowColor = accent;
+            e.ArrowColor = e.Item != null && Highlighted(e.Item) ? Color.White : muted;
             base.OnRenderArrow(e);
         }
         protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e) {
@@ -488,13 +563,51 @@ namespace CodexUsage {
             if (r.Width <= 0 || r.Height <= 0) return;
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             float w = Math.Max(1.5f, r.Height / 8f);
-            using (var pen = new Pen(accent, w)) {
+            using (var pen = new Pen(Highlighted(e.Item) ? Color.White : accent, w)) {
                 pen.StartCap = pen.EndCap = LineCap.Round;
+                pen.LineJoin = LineJoin.Round;
                 e.Graphics.DrawLines(pen, new[] {
                     new PointF(r.Left + r.Width * 0.22f, r.Top + r.Height * 0.52f),
                     new PointF(r.Left + r.Width * 0.42f, r.Top + r.Height * 0.72f),
                     new PointF(r.Left + r.Width * 0.78f, r.Top + r.Height * 0.30f) });
             }
+        }
+    }
+
+    // Capsule button in the style of a macOS / iOS tinted button.
+    public sealed class PillButton : Button {
+        bool hover, down;
+        public Color FillColor { get; set; }
+        public Color HoverColor { get; set; }
+        public Color PressedColor { get; set; }
+        public Color DisabledTextColor { get; set; }
+        public PillButton() {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
+            FillColor = Color.FromArgb(58, 58, 62);
+            HoverColor = Color.FromArgb(72, 72, 76);
+            PressedColor = Color.FromArgb(86, 86, 92);
+            DisabledTextColor = Color.FromArgb(110, 110, 115);
+        }
+        protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = down = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseDown(MouseEventArgs e) { if (e.Button == MouseButtons.Left) { down = true; Invalidate(); } base.OnMouseDown(e); }
+        protected override void OnMouseUp(MouseEventArgs e) { down = false; Invalidate(); base.OnMouseUp(e); }
+        protected override void OnEnabledChanged(EventArgs e) { hover = down = false; Invalidate(); base.OnEnabledChanged(e); }
+        protected override void OnPaint(PaintEventArgs e) {
+            Graphics g = e.Graphics;
+            using (var back = new SolidBrush(Parent != null ? Parent.BackColor : BackColor)) g.FillRectangle(back, ClientRectangle);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var r = new RectangleF(1, 1, Width - 2, Height - 2);
+            Color fill = !Enabled ? Hud.Mix(FillColor, Parent != null ? Parent.BackColor : BackColor, 0.4) : down ? PressedColor : hover ? HoverColor : FillColor;
+            using (var path = Shapes.Round(r, r.Height / 2f)) {
+                using (var brush = new SolidBrush(fill)) g.FillPath(brush, path);
+                using (var rim = new Pen(Color.FromArgb(Enabled ? 40 : 18, Color.White))) g.DrawPath(rim, path);
+            }
+            if (Focused && ShowFocusCues) using (var focus = new Pen(Hud.Dim(ForeColor, 160), 1.5f)) using (var path = Shapes.Round(RectangleF.Inflate(r, -2, -2), (r.Height - 4) / 2f)) g.DrawPath(focus, path);
+            TextRenderer.DrawText(g, Text, Font, ClientRectangle, Enabled ? ForeColor : DisabledTextColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
     }
 

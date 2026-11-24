@@ -157,6 +157,9 @@ Assert-Equal ($ui.NotificationThresholds -join ',') '30,15' 'Thresholds are vali
 Assert-True ($ui.ClearMode -and $ui.CompactMode -and -not $ui.NotificationsEnabled) 'Missing or invalid booleans keep defaults'
 $roundTrip = [CodexUsageDesktop.UiSettings]::FromObject($J::Parse($J::Json($ui.ToObject())),1,1)
 Assert-True ($roundTrip.BallY -eq 20 -and $roundTrip.PanelWidth -eq 440) 'UI settings round-trip'
+Assert-True ($ui.GlassEffect -and $roundTrip.GlassEffect) 'Frosted glass defaults on for older settings files'
+$opaque = [CodexUsageDesktop.UiSettings]::FromObject((T @{ glassEffect = $false }),440,840)
+Assert-True (-not ([CodexUsageDesktop.UiSettings]::FromObject($J::Parse($J::Json($opaque.ToObject())),1,1)).GlassEffect) 'Turning frosted glass off survives a restart'
 $legacyRemote = [CodexUsageDesktop.RemoteSettings]::FromObject((T @{ enabled = $true; deviceId = 'old-device'; deviceName = 'Old PC'; pairKey = 'old-pair-key-123'; includeSummary = $false; relayUrl = 'https://ntfy.sh' }))
 Assert-True ($legacyRemote.Enabled -and -not $legacyRemote.UsageSyncEnabled -and $legacyRemote.DeviceId -eq 'old-device') 'Legacy remote settings migrate with usage sync off'
 Assert-True ($legacyRemote.Active) 'Completion-only settings activate the worker'

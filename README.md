@@ -20,8 +20,8 @@ Windows 桌面悬浮窗，同时显示两个 ChatGPT/Codex 账号（个人 + 工
 ## 当前版本
 
 <!-- CURRENT_VERSION_START -->
-**v2.1.2**
-仓库改名为 `ai-usage-monitor`，更新源与手机网址随之更换。2.1.1 及更早的客户端需手动下载一次本版，之后照常自动更新；iPhone 需打开新地址重新添加到主屏幕。
+**v2.2.0**
+界面改为苹果风格的磨砂玻璃质感：悬浮窗与额度面板半透明并模糊背后的桌面，配色、圆角、额度条与圆环随之更新；右键 **磨砂玻璃效果** 可关闭。iPhone 网页同步换成玻璃材质。
 <!-- CURRENT_VERSION_END -->
 
 完整更新记录见 [CHANGELOG](CHANGELOG.md)，各版本亮点见[版本亮点](docs/RELEASE_HIGHLIGHTS.md)。
