@@ -61,15 +61,15 @@ The iPhone never receives Codex `auth.json`, access/refresh tokens, cookies, acc
 The mobile refresh button fetches the latest relay snapshot. It does not remotely command the Windows computer or log in to Codex. The PWA shell works offline, but quota snapshots are not persisted by the service worker.
 
 
-## Frosted glass (v2.2.0, revised in v2.2.1)
+## Frosted glass (v2.2.0; real blur since v2.3.0)
 
-The floating monitor and detail panel use Apple dark-mode colours, large rounded corners, hairline borders, capsule quota bars and smooth rings. With right-click **磨砂玻璃效果** on (the default), the floating monitor is uniformly translucent (90%); turn it off for a fully opaque monitor. The detail panel is always opaque. With the glass effect on, **清晰模式（紧凑条不额外透明）** keeps the compact strip at the same level as the expanded monitor instead of applying the **紧凑小窗透明度** value.
+The floating monitor is a real frosted-glass pane: its dark background is translucent and Windows blurs the desktop behind it (Windows 10 version 1803 or later, Windows 11), while text, numbers and rings stay fully opaque. The monitor paints itself, frame and contents, into a 32-bit image with real transparency and hands it to Windows (`UpdateLayeredWindow`). Right-click **磨砂玻璃效果** (on by default) to switch to an opaque dark background. On systems without blur support the background is simply translucent.
 
-v2.2.0 also asked Windows to blur the desktop behind both windows. WinForms draws text and backgrounds with GDI, which leaves pixel transparency unset, so the blur made cards white and gave text halos. v2.2.1 removes the blur.
+The detail panel uses the same colours, rounded cards, capsule bars and buttons but stays opaque: it is built from standard Windows controls, which cannot safely sit on a blurred background (v2.2.0 tried, and cards turned white with haloed text; v2.2.1 removed that blur).
 
 ## Compact transparency (v0.4.2): adjustable compact transparency and one-minute refresh
 
-The monitor defaults to **清晰模式（紧凑条不额外透明）** for readable text. Disable this right-click option to restore the saved transparency: **紧凑小窗透明度** selects **0–60% transparency**, initially 20%. Clear mode disables the slider and preserves its saved value. Windows opacity affects the entire window, including text; the expanded monitor and detail panel follow 磨砂玻璃效果: the expanded monitor stays at the glass level (fully opaque when it is off) and the detail panel is always opaque. **悬浮窗大小 → 小 / 中 / 大** selects a preferred 100%, 120%, or 140% size independently of monitor DPI, including the rings, compact strip and expanded monitor. If a small display cannot fit that size, the window scales down to its working area while keeping the saved preference. Both preferences survive restarts.
+The monitor defaults to **清晰模式（紧凑条不额外透明）** for readable text. Disable this right-click option to restore the saved transparency: **紧凑小窗透明度** selects **0–60% transparency**, initially 20%. Clear mode disables the slider and preserves its saved value. Windows opacity affects the entire window, including text; the expanded monitor and detail panel remain fully opaque (the glass background of the monitor is translucent per pixel regardless). **悬浮窗大小 → 小 / 中 / 大** selects a preferred 100%, 120%, or 140% size independently of monitor DPI, including the rings, compact strip and expanded monitor. If a small display cannot fit that size, the window scales down to its working area while keeping the saved preference. Both preferences survive restarts.
 
 Automatic quota refresh now runs every **60 seconds**. If a read is still running, the next tick is skipped rather than starting an overlapping worker.
 

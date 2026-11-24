@@ -20,6 +20,9 @@ namespace CodexUsageDesktop {
         static void Pump() { Application.DoEvents(); }
         static void Shot(Control control, string name) {
             try {
+                // The floating monitor draws itself (per-pixel alpha); save exactly that image.
+                var floating = control as FloatingForm;
+                if (floating != null) { using (Bitmap image = floating.RenderComposite()) image.Save(Path.Combine(output, name), ImageFormat.Png); return; }
                 using (var bitmap = new Bitmap(Math.Max(1, control.Width), Math.Max(1, control.Height))) {
                     control.DrawToBitmap(bitmap, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
                     bitmap.Save(Path.Combine(output, name), ImageFormat.Png);
@@ -95,6 +98,15 @@ namespace CodexUsageDesktop {
             app.RenderData(app.LastData);
             Pump();
             Check(app.ContentPanel.Controls.Count == 2, "Both Codex account cards render.");
+            Pump();
+            app.Ball.RenderLayered();
+            app.Log("Floating monitor: layered renders " + app.Ball.LayeredRenderCount + ", blur " + (app.Ball.BlurActive ? "on" : "unavailable") + (app.Ball.LastLayeredError.Length > 0 ? ", " + app.Ball.LastLayeredError : ""));
+            Check(app.Ball.LayeredRenderCount > 0 && app.Ball.LastLayeredError.Length == 0, "Floating monitor is drawn with per-pixel alpha: " + app.Ball.LastLayeredError);
+            using (Bitmap frame = app.Ball.RenderComposite()) {
+                Color corner = frame.GetPixel(0, 0), middle = frame.GetPixel(app.U(5), frame.Height / 2);
+                Check(corner.A == 0, "Rounded corners are fully transparent.");
+                Check(middle.A > 0 && middle.A < 255, "Glass background is translucent so the blur shows through: alpha " + middle.A);
+            }
             Check(app.BallCells["personal"].Five.Text == "100%", "Personal 5-hour summary is visible.");
             Check(app.BallCells["work"].Long.Text == "21%", "Work summary uses the limiting long-term quota.");
             Check(app.ResetLabels.Count == 5, "All five meaningful quota windows render.");
@@ -210,30 +222,30 @@ namespace CodexUsageDesktop {
             app.SetMonitorExpanded(false);
             Pump();
             Check(app.Ball.Height == app.B(64), "Compact mode is a narrow strip.");
-            double solid = TrayApp.GlassMonitorOpacity;
+            double solid = 1.0;
             Check(app.Settings.GlassEffect && app.ItemGlass.Checked && app.Ball.GlassEnabled, "Frosted glass is on by default.");
-            Check(Math.Abs(app.Ball.Opacity - solid) < 0.01, "Clear mode keeps the compact strip at the glass baseline.");
+            Check(app.Ball.Opacity == 1, "Clear mode keeps the compact strip fully opaque over the glass.");
             Check(app.Popup.Opacity == 1, "Detail panel stays opaque for readability.");
             app.ItemClear.PerformClick();
             Check(!app.Settings.ClearMode && Math.Abs(app.Ball.Opacity - 0.8) < 0.01, "Disabling clear mode restores 20% transparency.");
             app.OpacitySlider.Value = 45;
             Check(app.Settings.CompactOpacity == 55 && Math.Abs(app.Ball.Opacity - 0.55) < 0.01, "Slider updates and applies opacity.");
             app.SetMonitorExpanded(true);
-            Check(Math.Abs(app.Ball.Opacity - solid) < 0.01, "Expanded monitor returns to the readable glass baseline.");
+            Check(Math.Abs(app.Ball.Opacity - solid) < 0.01, "Expanded monitor returns to full opacity.");
             app.SetMonitorExpanded(false);
             Check(Math.Abs(app.Ball.Opacity - 0.55) < 0.01, "Collapsing restores the selected opacity.");
             app.OpacitySlider.Value = 60;
             Check(Math.Abs(app.Ball.Opacity - 0.4) < 0.01, "Maximum transparency keeps the compact window visible.");
             app.OpacitySlider.Value = 20;
             app.ItemClear.PerformClick();
-            Check(app.Settings.ClearMode && Math.Abs(app.Ball.Opacity - solid) < 0.01 && !app.OpacitySlider.Enabled, "Clear mode disables the slider and restores the baseline.");
+            Check(app.Settings.ClearMode && Math.Abs(app.Ball.Opacity - solid) < 0.01 && !app.OpacitySlider.Enabled, "Clear mode disables the slider and restores full opacity.");
             app.ItemGlass.PerformClick();
-            Check(!app.Settings.GlassEffect && !app.Ball.GlassEnabled && app.Ball.Opacity == 1 && app.Popup.Opacity == 1, "Turning glass off makes the monitor opaque.");
+            Check(!app.Settings.GlassEffect && !app.Ball.GlassEnabled && app.Ball.Opacity == 1 && app.Popup.Opacity == 1, "Turning glass off keeps the monitor and panel opaque.");
             app.SetMonitorExpanded(true);
             Check(app.Ball.Opacity == 1, "Expanded monitor is opaque without glass.");
             app.SetMonitorExpanded(false);
             app.ItemGlass.PerformClick();
-            Check(app.Settings.GlassEffect && app.Ball.GlassEnabled && Math.Abs(app.Ball.Opacity - solid) < 0.01, "Turning glass back on restores translucency.");
+            Check(app.Settings.GlassEffect && app.Ball.GlassEnabled && Math.Abs(app.Ball.Opacity - solid) < 0.01, "Turning glass back on restores the glass background.");
             Check(app.CompactGrid.Visible && !app.ExpandedGrid.Visible, "Only the compact grid is visible.");
             Check(app.CompactCells["personal"].Text == "个人 100% / 95%", "Compact mode shows independent 5-hour and long-term percentages.");
             Check(app.CompactCells["work"].Text == "工作 49% / 21%", "Compact mode preserves independent account values.");

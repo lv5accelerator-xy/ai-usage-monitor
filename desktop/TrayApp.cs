@@ -52,9 +52,9 @@ namespace CodexUsageDesktop {
             TextMuted = Html("#98989F"), Danger = Html("#FF453A"), Warning = Html("#FF9F0A"), Good = Html("#30D158"), Track = Html("#3A3A3E"),
             ButtonBack = Html("#3A3A3C"), ButtonBorder = Html("#48484A"), ButtonHover = Html("#48484A"), BallBack = Html("#1E1E21"), BallBorder = Html("#4A4A50"),
             AccentCodex = Html("#409CFF"), AccentClaude = Html("#BF5AF2"), Caption = Html("#8E8E93"), MenuSelect = Html("#0A84FF");
-        // Floating-monitor opacity while the glass effect is on. The detail panel stays opaque:
-        // without blur, page text behind a translucent panel hurts readability.
-        public const double GlassMonitorOpacity = 0.9;
+        // Share of the base tone over the blurred desktop on the floating monitor (0-255).
+        // Text and quota bars stay fully opaque; only the background is glass.
+        public const int GlassTintAlpha = 196;
         readonly Dictionary<string, Font> fonts = new Dictionary<string, Font>();
 
         // ---------------------------------------------------------------- controls
@@ -274,13 +274,10 @@ namespace CodexUsageDesktop {
             RestLocation = new Point(x, y);
         }
 
-        // Baseline opacity of the floating monitor: translucent with the glass effect, otherwise opaque.
-        public double MonitorSolidOpacity { get { return Settings.GlassEffect ? GlassMonitorOpacity : 1.0; } }
-
         public void UpdateMonitorOpacity() {
-            // Windows applies opacity to the whole compact window, including text.
-            double solid = MonitorSolidOpacity;
-            Ball.Opacity = MonitorExpanded || Settings.ClearMode ? solid : Math.Min(solid, Settings.CompactOpacity / 100.0);
+            // Whole-window opacity (text included) for the compact strip; the glass background is
+            // translucent per pixel regardless, with the desktop blurred behind it.
+            Ball.Opacity = MonitorExpanded || Settings.ClearMode ? 1.0 : Settings.CompactOpacity / 100.0;
             if (OpacitySlider != null) OpacitySlider.Enabled = !Settings.ClearMode;
         }
 
