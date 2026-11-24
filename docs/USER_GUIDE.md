@@ -61,9 +61,13 @@ The iPhone never receives Codex `auth.json`, access/refresh tokens, cookies, acc
 The mobile refresh button fetches the latest relay snapshot. It does not remotely command the Windows computer or log in to Codex. The PWA shell works offline, but quota snapshots are not persisted by the service worker.
 
 
+## Frosted glass (Unreleased)
+
+The floating monitor and detail panel use an Apple-style frosted-glass look: both windows are slightly translucent and Windows blurs the desktop behind them (Windows 10 version 1803 or later, Windows 11). Right-click **磨砂玻璃效果** to turn it off; both windows then become fully opaque. With the glass effect on, **清晰模式（紧凑条不额外透明）** keeps the compact strip at the same glass level as the expanded monitor instead of applying the **紧凑小窗透明度** value. On systems without blur support the windows are simply translucent.
+
 ## Compact transparency (v0.4.2): adjustable compact transparency and one-minute refresh
 
-The monitor defaults to **清晰模式（不透明）** for readable text. Disable this right-click option to restore the saved transparency: **紧凑小窗透明度** selects **0–60% transparency**, initially 20%. Clear mode disables the slider and preserves its saved value. Windows opacity affects the entire window, including text; the expanded monitor and detail panel remain fully opaque. **悬浮窗大小 → 小 / 中 / 大** selects a preferred 100%, 120%, or 140% size independently of monitor DPI, including the rings, compact strip and expanded monitor. If a small display cannot fit that size, the window scales down to its working area while keeping the saved preference. Both preferences survive restarts.
+The monitor defaults to **清晰模式（紧凑条不额外透明）** for readable text. Disable this right-click option to restore the saved transparency: **紧凑小窗透明度** selects **0–60% transparency**, initially 20%. Clear mode disables the slider and preserves its saved value. Windows opacity affects the entire window, including text; the expanded monitor and detail panel stay at the frosted-glass level (fully opaque when 磨砂玻璃效果 is off). **悬浮窗大小 → 小 / 中 / 大** selects a preferred 100%, 120%, or 140% size independently of monitor DPI, including the rings, compact strip and expanded monitor. If a small display cannot fit that size, the window scales down to its working area while keeping the saved preference. Both preferences survive restarts.
 
 Automatic quota refresh now runs every **60 seconds**. If a read is still running, the next tick is skipped rather than starting an overlapping worker.
 

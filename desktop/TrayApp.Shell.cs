@@ -87,6 +87,7 @@ namespace CodexUsageDesktop {
             Popup.DisplayEnvironmentChanged += desktopChanged;
             SetMonitorSize(Settings.MonitorSize, true);
             SetMonitorExpanded(!Settings.CompactMode);
+            ApplyGlassEffect();
             if (Settings.RingMode) SnapMonitor();
             if (Settings.BallVisible && !Smoke) Ball.Show();
             if (Smoke) SetMonitorExpanded(true);
@@ -116,7 +117,7 @@ namespace CodexUsageDesktop {
             AddRow(header, 30);
             AddRow(header, 22);
             Label title = NewLabel("Codex + Claude 额度", 15, false, true, false);
-            Label subtitle = NewLabel("USAGE MONITOR // 所有数值均为剩余", 9, true);
+            Label subtitle = NewLabel("所有数值均为剩余额度", 9, true);
             subtitle.ForeColor = Caption;
             header.Controls.Add(title, 0, 0);
             header.Controls.Add(subtitle, 0, 1);
@@ -133,6 +134,7 @@ namespace CodexUsageDesktop {
             viewport.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             ScrollBar = new VScrollBar { Dock = DockStyle.Fill, Margin = new Padding(0), AccessibleName = "额度面板垂直滚动" };
             ScrollBar.ValueChanged += delegate { UpdateCardWidths(); };
+            ScrollBar.HandleCreated += delegate { Glass.DarkScrollBar(ScrollBar); };
             ContentPanel.MouseWheel += delegate(object s, MouseEventArgs e) { MoveVerticalScroll(e.Delta); };
             viewport.Controls.Add(ContentPanel, 0, 0);
             viewport.Controls.Add(ScrollBar, 1, 0);
@@ -140,6 +142,7 @@ namespace CodexUsageDesktop {
             StatusLabel = NewLabel("", 9, true);
             StatusLabel.Padding = new Padding(U(20), 0, U(20), 0);
             root.Controls.Add(StatusLabel, 0, 2);
+            Popup.HandleCreated += delegate { Glass.SetBlur(Popup.Handle, Settings.GlassEffect); };
             Popup.ResizeEnd += delegate { SaveSettings(); };
             Popup.FormClosing += delegate(object s, FormClosingEventArgs e) {
                 if (!Exiting && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Popup.Hide(); SaveSettings(); }
@@ -147,8 +150,8 @@ namespace CodexUsageDesktop {
         }
 
         void BuildBall() {
-            Ball = new FloatingForm { DisplayDpi = (int)(UiScale * 96), Text = "Codex + Claude 额度悬浮面板", AutoScaleMode = AutoScaleMode.None, FormBorderStyle = FormBorderStyle.None, ShowInTaskbar = false, TopMost = Settings.TopMost, StartPosition = FormStartPosition.Manual, BackColor = BallBack, BorderColor = BallBorder, AccentColor = AccentCodex };
-            Ball.Radius = U(10);
+            Ball = new FloatingForm { DisplayDpi = (int)(UiScale * 96), Text = "Codex + Claude 额度悬浮面板", AutoScaleMode = AutoScaleMode.None, FormBorderStyle = FormBorderStyle.None, ShowInTaskbar = false, TopMost = Settings.TopMost, StartPosition = FormStartPosition.Manual, BackColor = BallBack, BorderColor = BallBorder, AccentColor = AccentCodex, GlassEnabled = Settings.GlassEffect };
+            Ball.Radius = U(14);
             Ball.ClientSize = new Size(U(320), U(142));
             Ball.Padding = new Padding(U(14), U(10), U(14), U(10));
             int count = ActiveIds().Length;
@@ -246,7 +249,7 @@ namespace CodexUsageDesktop {
         }
 
         void BuildMenu() {
-            Menu = new ContextMenuStrip { Renderer = new HudMenuRenderer(CardBack, CardBorder, ButtonHover, TextPrimary, TextMuted, AccentCodex), BackColor = CardBack, ForeColor = TextPrimary };
+            Menu = new ContextMenuStrip { Renderer = new HudMenuRenderer(CardBack, CardBorder, MenuSelect, TextPrimary, TextMuted, AccentCodex), BackColor = CardBack, ForeColor = TextPrimary };
             ToolStripItemCollection items = Menu.Items;
             ItemCompact = Check(items, "紧凑模式（悬停展开）", Settings.CompactMode, delegate {
                 Settings.RingMode = false; ItemRings.Checked = false;
@@ -266,7 +269,8 @@ namespace CodexUsageDesktop {
                 SaveSettings();
             });
             if (ItemRings.Checked) ItemCompact.Checked = false;
-            ItemClear = Check(items, "清晰模式（不透明）", Settings.ClearMode, delegate { Settings.ClearMode = ItemClear.Checked; UpdateMonitorOpacity(); SaveSettings(); });
+            ItemGlass = Check(items, "磨砂玻璃效果", Settings.GlassEffect, delegate { Settings.GlassEffect = ItemGlass.Checked; ApplyGlassEffect(); SaveSettings(); });
+            ItemClear = Check(items, "清晰模式（紧凑条不额外透明）", Settings.ClearMode, delegate { Settings.ClearMode = ItemClear.Checked; UpdateMonitorOpacity(); SaveSettings(); });
             var sizeMenu = Item(items, "悬浮窗大小", null);
             foreach (var option in new[] { new[] { "small", "小" }, new[] { "medium", "中" }, new[] { "large", "大" } }) {
                 string id = option[0];
@@ -374,6 +378,16 @@ namespace CodexUsageDesktop {
             Item(items, "打开日志文件夹", delegate { try { Process.Start("explorer.exe", Client.Quote(LogDir)); } catch (Exception) { } });
             Item(items, "退出", delegate { Exit(); });
             foreach (Control control in Tree(Ball).ToList()) control.ContextMenuStrip = Menu;
+            RoundMenuCorners(Menu);
+        }
+
+        // Windows 11 draws rounded, shadowed menus when asked; submenus are separate windows.
+        static void RoundMenuCorners(ToolStripDropDown dropDown) {
+            dropDown.Opened += delegate { Glass.RoundCorners(dropDown.Handle, true); };
+            foreach (ToolStripItem item in dropDown.Items) {
+                var menuItem = item as ToolStripMenuItem;
+                if (menuItem != null && menuItem.HasDropDownItems) RoundMenuCorners(menuItem.DropDown);
+            }
         }
 
         static void OpenUrl(string url) { try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch (Exception) { } }

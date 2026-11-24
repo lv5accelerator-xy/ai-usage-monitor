@@ -86,7 +86,7 @@ namespace CodexUsageDesktop {
             object usage = J.Get(profile, "localUsage");
             bool showLocal = isClaude ? hasLocalKey && (ok || usage != null) : ok && usage != null;
             Color accent = Accent(isClaude ? "claude" : id);
-            var card = new Surface { Radius = U(6), HudUnit = (float)(Popup.DisplayDpi / 96.0), BackColor = CardBack, BorderColor = CardBorder, AccentColor = accent, Padding = new Padding(U(16)), Margin = new Padding(0, 0, 0, U(12)) };
+            var card = new Surface { Radius = U(14), HudUnit = (float)(Popup.DisplayDpi / 96.0), BackColor = CardBack, BorderColor = CardBorder, AccentColor = accent, Padding = new Padding(U(16)), Margin = new Padding(0, 0, 0, U(12)) };
             int height;
             if (isClaude) {
                 int body = !ok ? 104 : localOnly ? 60 : 100 + 82 + 82 * extraWindows.Count;
