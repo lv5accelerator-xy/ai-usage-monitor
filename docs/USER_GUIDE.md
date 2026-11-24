@@ -61,7 +61,7 @@ The iPhone never receives Codex `auth.json`, access/refresh tokens, cookies, acc
 The mobile refresh button fetches the latest relay snapshot. It does not remotely command the Windows computer or log in to Codex. The PWA shell works offline, but quota snapshots are not persisted by the service worker.
 
 
-## Frosted glass (Unreleased)
+## Frosted glass (v2.2.0)
 
 The floating monitor and detail panel use an Apple-style frosted-glass look: both windows are slightly translucent and Windows blurs the desktop behind them (Windows 10 version 1803 or later, Windows 11). Right-click **磨砂玻璃效果** to turn it off; both windows then become fully opaque. With the glass effect on, **清晰模式（紧凑条不额外透明）** keeps the compact strip at the same glass level as the expanded monitor instead of applying the **紧凑小窗透明度** value. On systems without blur support the windows are simply translucent.
 
