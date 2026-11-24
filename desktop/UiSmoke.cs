@@ -213,7 +213,7 @@ namespace CodexUsageDesktop {
             double solid = TrayApp.GlassMonitorOpacity;
             Check(app.Settings.GlassEffect && app.ItemGlass.Checked && app.Ball.GlassEnabled, "Frosted glass is on by default.");
             Check(Math.Abs(app.Ball.Opacity - solid) < 0.01, "Clear mode keeps the compact strip at the glass baseline.");
-            Check(Math.Abs(app.Popup.Opacity - TrayApp.GlassPanelOpacity) < 0.01, "Detail panel is translucent glass.");
+            Check(app.Popup.Opacity == 1, "Detail panel stays opaque for readability.");
             app.ItemClear.PerformClick();
             Check(!app.Settings.ClearMode && Math.Abs(app.Ball.Opacity - 0.8) < 0.01, "Disabling clear mode restores 20% transparency.");
             app.OpacitySlider.Value = 45;
@@ -228,7 +228,7 @@ namespace CodexUsageDesktop {
             app.ItemClear.PerformClick();
             Check(app.Settings.ClearMode && Math.Abs(app.Ball.Opacity - solid) < 0.01 && !app.OpacitySlider.Enabled, "Clear mode disables the slider and restores the baseline.");
             app.ItemGlass.PerformClick();
-            Check(!app.Settings.GlassEffect && !app.Ball.GlassEnabled && app.Ball.Opacity == 1 && app.Popup.Opacity == 1, "Turning glass off makes both windows opaque.");
+            Check(!app.Settings.GlassEffect && !app.Ball.GlassEnabled && app.Ball.Opacity == 1 && app.Popup.Opacity == 1, "Turning glass off makes the monitor opaque.");
             app.SetMonitorExpanded(true);
             Check(app.Ball.Opacity == 1, "Expanded monitor is opaque without glass.");
             app.SetMonitorExpanded(false);

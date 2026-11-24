@@ -47,14 +47,14 @@ namespace CodexUsageDesktop {
 
         // ---------------------------------------------------------------- theme
         public static Color Html(string value) { return ColorTranslator.FromHtml(value); }
-        // Apple dark-mode materials and system colours. Windows are translucent and the
-        // desktop behind them is blurred (see Glass); these are the opaque base tones.
+        // Apple dark-mode materials and system colours (opaque base tones).
         public readonly Color PopupBack = Html("#1C1C1E"), CardBack = Html("#2C2C2E"), CardBorder = Html("#3A3A3C"), TextPrimary = Html("#F5F5F7"),
             TextMuted = Html("#98989F"), Danger = Html("#FF453A"), Warning = Html("#FF9F0A"), Good = Html("#30D158"), Track = Html("#3A3A3E"),
             ButtonBack = Html("#3A3A3C"), ButtonBorder = Html("#48484A"), ButtonHover = Html("#48484A"), BallBack = Html("#1E1E21"), BallBorder = Html("#4A4A50"),
             AccentCodex = Html("#409CFF"), AccentClaude = Html("#BF5AF2"), Caption = Html("#8E8E93"), MenuSelect = Html("#0A84FF");
-        // Window opacity while the frosted-glass effect is on: the share of the base tone over the blurred desktop.
-        public const double GlassMonitorOpacity = 0.86, GlassPanelOpacity = 0.92;
+        // Floating-monitor opacity while the glass effect is on. The detail panel stays opaque:
+        // without blur, page text behind a translucent panel hurts readability.
+        public const double GlassMonitorOpacity = 0.9;
         readonly Dictionary<string, Font> fonts = new Dictionary<string, Font>();
 
         // ---------------------------------------------------------------- controls
@@ -274,8 +274,7 @@ namespace CodexUsageDesktop {
             RestLocation = new Point(x, y);
         }
 
-        // Baseline opacity of the floating monitor: translucent over the blurred desktop
-        // with the glass effect, otherwise fully opaque.
+        // Baseline opacity of the floating monitor: translucent with the glass effect, otherwise opaque.
         public double MonitorSolidOpacity { get { return Settings.GlassEffect ? GlassMonitorOpacity : 1.0; } }
 
         public void UpdateMonitorOpacity() {
@@ -289,10 +288,6 @@ namespace CodexUsageDesktop {
             bool glass = Settings.GlassEffect;
             Ball.GlassEnabled = glass;
             UpdateMonitorOpacity();
-            if (Popup != null) {
-                Popup.Opacity = glass ? GlassPanelOpacity : 1.0;
-                if (Popup.IsHandleCreated) Glass.SetBlur(Popup.Handle, glass);
-            }
         }
 
         Point DockedLocation(Point rest) {
