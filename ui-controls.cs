@@ -168,6 +168,61 @@ namespace CodexUsage {
             }
         }
         public static Color Dim(Color color, int alpha) { return Color.FromArgb(Math.Max(0, Math.Min(255, alpha)), color); }
+
+        // "Follow the light" palettes: cool blue-violet-amber, and a warm one for low quota.
+        public static readonly Color[] CoolLight = { Color.FromArgb(90, 169, 255), Color.FromArgb(214, 128, 255), Color.FromArgb(255, 176, 102) };
+        public static readonly Color[] WarmLight = { Color.FromArgb(255, 159, 10), Color.FromArgb(255, 69, 58), Color.FromArgb(255, 120, 190) };
+
+        static LinearGradientBrush RimBrush(RectangleF bounds, double phase, Color[] palette, double alpha) {
+            float cx = bounds.Left + bounds.Width / 2, cy = bounds.Top + bounds.Height / 2;
+            float r = (float)Math.Sqrt(bounds.Width * bounds.Width + bounds.Height * bounds.Height) / 2 + 2;
+            var square = new RectangleF(cx - r, cy - r, r * 2, r * 2);
+            var brush = new LinearGradientBrush(square, Color.Transparent, Color.Transparent, (float)(phase * 360.0 % 360.0));
+            int a = Math.Max(0, Math.Min(255, (int)(255 * alpha))), soft = (int)(a * 0.22);
+            brush.InterpolationColors = new ColorBlend {
+                Colors = new[] { Color.FromArgb(soft, palette[2]), Color.FromArgb(soft, palette[0]), Color.FromArgb(a, palette[0]), Color.FromArgb(a, palette[1]), Color.FromArgb(a, palette[2]), Color.FromArgb(soft, palette[2]), Color.FromArgb(soft, palette[0]) },
+                Positions = new[] { 0f, 0.34f, 0.43f, 0.5f, 0.57f, 0.66f, 1f }
+            };
+            return brush;
+        }
+
+        // A coloured light travelling around a rounded rim: a crisp core line plus two softer
+        // glow passes. The bright band crosses the shape through its centre and rotates with phase.
+        public static void LightRim(Graphics g, RectangleF bounds, float radius, double phase, double level, Color[] palette, float unit) {
+            if (level <= 0.01 || bounds.Width < 4 || bounds.Height < 4) return;
+            level = Math.Min(1, level);
+            unit = Math.Max(0.5f, unit);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Shapes.Round(bounds, radius)) {
+                foreach (var pass in new[] { new[] { 6f, 0.16f }, new[] { 3f, 0.38f }, new[] { 1.3f, 1f } })
+                    using (var brush = RimBrush(bounds, phase, palette, level * pass[1]))
+                    using (var pen = new Pen(brush, unit * pass[0])) g.DrawPath(pen, path);
+            }
+        }
+
+        // Skeleton placeholder: a translucent pill with a highlight band sweeping across it.
+        public static void Shimmer(Graphics g, RectangleF r, double phase) {
+            if (r.Width < 2 || r.Height < 2) return;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Shapes.Round(r, r.Height / 2)) {
+                using (var fill = new SolidBrush(Color.FromArgb(40, 255, 255, 255))) g.FillPath(fill, path);
+                float span = Math.Max(4f, r.Width * 0.7f);
+                float x = r.Left - span + (float)((phase % 1.0 + 1.0) % 1.0) * (r.Width + span);
+                var band = new RectangleF(x, r.Top, span, r.Height);
+                using (var brush = new LinearGradientBrush(new RectangleF(band.Left - 1, band.Top, band.Width + 2, band.Height + 1), Color.Transparent, Color.Transparent, LinearGradientMode.Horizontal)) {
+                    brush.InterpolationColors = new ColorBlend { Colors = new[] { Color.FromArgb(0, 255, 255, 255), Color.FromArgb(95, 255, 255, 255), Color.FromArgb(0, 255, 255, 255) }, Positions = new[] { 0f, 0.5f, 1f } };
+                    Region old = g.Clip;
+                    g.SetClip(path, CombineMode.Intersect);
+                    g.FillRectangle(brush, band);
+                    g.Clip = old;
+                    old.Dispose();
+                }
+            }
+        }
+
+        public static double EaseOut(double t) { t = Math.Max(0, Math.Min(1, t)); return 1 - Math.Pow(1 - t, 3); }
+        // Slight overshoot, the elastic settle used by the bars, the segmented pill and the slider.
+        public static double EaseOutBack(double t) { t = Math.Max(0, Math.Min(1, t)); const double c = 1.6; return 1 + (c + 1) * Math.Pow(t - 1, 3) + c * Math.Pow(t - 1, 2); }
         public static Color Mix(Color a, Color b, double t) {
             t = Math.Max(0, Math.Min(1, t));
             return Color.FromArgb((int)Math.Round(a.R + (b.R - a.R) * t), (int)Math.Round(a.G + (b.G - a.G) * t), (int)Math.Round(a.B + (b.B - a.B) * t));
@@ -242,6 +297,10 @@ namespace CodexUsage {
         public float HudUnit { get; set; }
         // Share of the base tone painted over the blurred desktop (0-255) while glass is on.
         public int GlassTintAlpha { get; set; }
+        // Travelling light on the window rim (0 = off). Phase 0-1 turns the light once around.
+        public double GlowLevel { get; set; }
+        public double GlowPhase { get; set; }
+        public bool GlowWarm { get; set; }
         public int LayeredRenderCount { get; private set; }
         public string LastLayeredError { get; private set; }
         public bool BlurActive { get; private set; }
@@ -361,6 +420,7 @@ namespace CodexUsage {
             }
             Color border = glassEnabled ? Color.FromArgb(52, 255, 255, 255) : BorderColor;
             Hud.GlassEdge(g, new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), Radius, border, HighlightColor, unit);
+            Hud.LightRim(g, new RectangleF(0.75f, 0.75f, Width - 1.5f, Height - 1.5f), Radius, GlowPhase, GlowLevel, GlowWarm ? Hud.WarmLight : Hud.CoolLight, unit);
         }
 
         // Control.Visible is false while the window itself is hidden; the control's own flag
@@ -434,6 +494,13 @@ namespace CodexUsage {
         public Color TrackColor { get; set; }
         public Color CaptionColor { get; set; }
         public string ValueText { get { return QuotaFormat.Percent(Value) + (Stale ? "!" : ""); } }
+        // Motion state, driven by the app's animation clock: pointer-over light rim (0-1),
+        // shared light phase, breathing while a refresh runs, skeleton while first loading.
+        public double HoverLevel { get; set; }
+        public double Phase { get; set; }
+        public double Clock { get; set; }
+        public bool Breathing { get; set; }
+        public bool Loading { get; set; }
         public QuotaRing() {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
@@ -456,8 +523,24 @@ namespace CodexUsage {
             var ring = new RectangleF((Width - diameter) / 2, 5 * scale, diameter, diameter);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             bool known = Value >= 0 && !Double.IsNaN(Value) && !Double.IsInfinity(Value);
+            bool loading = Loading && !known;
+            if (HoverLevel > 0.01) {
+                var cell = new RectangleF(1.5f * scale, 1.5f, Width - 3f * scale, Height - 3f);
+                using (var path = Shapes.Round(cell, 10 * scale))
+                using (var wash = new SolidBrush(Color.FromArgb((int)(22 * Math.Min(1, HoverLevel)), 255, 255, 255))) g.FillPath(wash, path);
+                Hud.LightRim(g, cell, 10 * scale, Phase, HoverLevel, Hud.CoolLight, scale);
+            }
             Color fill = Stale ? Hud.Dim(FillColor, 150) : FillColor;
+            // Breathing: the arc's brightness rises and falls on a 1.6 s cycle while reading.
+            if (Breathing && known) fill = Hud.Dim(fill, (int)(150 + 105 * (0.5 + 0.5 * Math.Sin(Clock * Math.PI * 2 / 1.6))));
             using (var track = new Pen(alpha ? Color.FromArgb(46, 255, 255, 255) : TrackColor, stroke)) g.DrawEllipse(track, ring);
+            if (Breathing || loading) {
+                // A short comet circling the track (Arc Breath) while data is being read.
+                using (var comet = new Pen(Color.FromArgb(loading ? 170 : 110, 255, 255, 255), stroke)) {
+                    comet.StartCap = comet.EndCap = LineCap.Round;
+                    g.DrawArc(comet, ring, (float)(-90 + Clock * 300 % 360), 46);
+                }
+            }
             if (known && Value > 0) {
                 float sweep = (float)(Math.Min(100, Value) * 3.6);
                 using (var pen = new Pen(fill, stroke)) {
@@ -471,7 +554,8 @@ namespace CodexUsage {
             // applying the graphics device's DPI a second time to point fonts.
             using (var valueFont = new Font(NumberFont.Family, 10.5f * scale, NumberFont.Style(true), GraphicsUnit.Pixel))
             using (var captionFont = new Font("Microsoft YaHei UI", (28f / 3) * scale, FontStyle.Regular, GraphicsUnit.Pixel)) {
-                GlassText.Draw(g, valueText, valueFont, Rectangle.Round(ring), ForeColor,
+                if (loading) Hud.Shimmer(g, new RectangleF(ring.Left + ring.Width * 0.27f, ring.Top + ring.Height / 2 - 3.5f * scale, ring.Width * 0.46f, 7 * scale), Clock / 1.2);
+                else GlassText.Draw(g, valueText, valueFont, Rectangle.Round(ring), ForeColor,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding, alpha);
                 string[] lines = (Caption ?? "").Split(new char[] { '\n' }, 2);
                 var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
@@ -663,63 +747,6 @@ namespace CodexUsage {
         }
     }
 
-    // Seven-day token trend: bottom-aligned bars, today's bar highlighted with a glow,
-    // day captions underneath. Values are relative to the week's maximum.
-    public sealed class UsageSparkline : Control {
-        double[] values = new double[0];
-        string[] labels = new string[0];
-        public Color BarColor { get; set; }
-        public Color TrackColor { get; set; }
-        public Color CaptionColor { get; set; }
-        public int HighlightIndex { get; set; }
-        public UsageSparkline() {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BarColor = Color.FromArgb(64, 156, 255);
-            TrackColor = Color.FromArgb(58, 58, 62);
-            CaptionColor = Color.FromArgb(142, 142, 147);
-            HighlightIndex = -1;
-        }
-        public double[] Values { get { return values; } }
-        public string[] Labels { get { return labels; } }
-        public void SetData(double[] data, string[] captions) {
-            values = data ?? new double[0];
-            labels = captions ?? new string[0];
-            Invalidate();
-        }
-        protected override void OnPaint(PaintEventArgs e) {
-            base.OnPaint(e);
-            int count = values.Length;
-            if (count == 0 || Width < 8 || Height < 12) return;
-            float captionHeight = Math.Max(10f, Height * 0.3f);
-            float chartHeight = Height - captionHeight - 2;
-            float gap = Math.Max(3f, Width / (count * 2.2f));
-            float bar = (Width - gap * (count - 1)) / count;
-            double max = 0;
-            foreach (double v in values) if (!Double.IsNaN(v) && v > max) max = v;
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            float radius = Math.Min(bar / 2f, 4f);
-            using (var track = new SolidBrush(TrackColor))
-            using (var dim = new SolidBrush(Hud.Dim(BarColor, 110)))
-            using (var bright = new SolidBrush(BarColor))
-            using (var font = new Font("Microsoft YaHei UI", Math.Max(7f, captionHeight * 0.78f), FontStyle.Regular, GraphicsUnit.Pixel)) {
-                for (int i = 0; i < count; i++) {
-                    float x = i * (bar + gap);
-                    using (var path = Shapes.Round(new RectangleF(x, 0, bar, chartHeight), radius)) e.Graphics.FillPath(track, path);
-                    double v = values[i];
-                    if (max > 0 && v > 0 && !Double.IsNaN(v)) {
-                        float h = Math.Min(chartHeight, Math.Max(radius * 2 + 1, (float)(chartHeight * v / max)));
-                        bool today = i == HighlightIndex;
-                        using (var path = Shapes.Round(new RectangleF(x, chartHeight - h, bar, h), radius)) e.Graphics.FillPath(today ? bright : dim, path);
-                    }
-                    if (i < labels.Length && !string.IsNullOrEmpty(labels[i]))
-                        TextRenderer.DrawText(e.Graphics, labels[i], font, new Rectangle((int)x - 4, (int)(chartHeight + 2), (int)bar + 8, (int)captionHeight),
-                            i == HighlightIndex ? BarColor : CaptionColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
-                }
-            }
-        }
-    }
-
     // macOS-style dark menu: glass-grey surface, rounded blue selection with white text.
     public sealed class HudColorTable : ProfessionalColorTable {
         readonly Color back, border, select;
@@ -834,6 +861,8 @@ namespace CodexUsage {
         public Color FiveColor { get; set; }
         public Color LongColor { get; set; }
         public Color SeparatorColor { get; set; }
+        public bool Loading { get; set; }
+        public double Clock { get; set; }
         public SplitQuotaLabel() { DoubleBuffered = true; ResizeRedraw = true; AccountName = ""; FiveText = LongText = "—"; FiveColor = LongColor = Color.White; SeparatorColor = Color.Gray; }
         protected override void OnPaint(PaintEventArgs e) {
             base.OnPaint(e);
@@ -844,9 +873,17 @@ namespace CodexUsage {
             int separatorWidth = GlassText.Width(g, "/", Font, flags, alpha) + Math.Max(4, Font.Height / 6);
             int nameWidth = Width * 32 / 100, valueWidth = Math.Max(0, (Width - nameWidth - separatorWidth) / 2);
             GlassText.Draw(g, AccountName, Font, new Rectangle(0, 0, nameWidth, Height), ForeColor, flags, alpha);
-            GlassText.Draw(g, FiveText, Font, new Rectangle(nameWidth, 0, valueWidth, Height), FiveColor, flags, alpha);
+            var five = new Rectangle(nameWidth, 0, valueWidth, Height);
+            var longer = new Rectangle(nameWidth + valueWidth + separatorWidth, 0, valueWidth, Height);
+            if (Loading && FiveText == "—" && LongText == "—") {
+                float h = Math.Max(4f, Font.Height * 0.42f), w = Math.Min(valueWidth * 0.7f, h * 4.2f);
+                Hud.Shimmer(g, new RectangleF(five.Left + (five.Width - w) / 2, (Height - h) / 2, w, h), Clock / 1.2);
+                Hud.Shimmer(g, new RectangleF(longer.Left + (longer.Width - w) / 2, (Height - h) / 2, w, h), Clock / 1.2 + 0.15);
+            } else {
+                GlassText.Draw(g, FiveText, Font, five, FiveColor, flags, alpha);
+                GlassText.Draw(g, LongText, Font, longer, LongColor, flags, alpha);
+            }
             GlassText.Draw(g, "/", Font, new Rectangle(nameWidth + valueWidth, 0, separatorWidth, Height), SeparatorColor, flags, alpha);
-            GlassText.Draw(g, LongText, Font, new Rectangle(nameWidth + valueWidth + separatorWidth, 0, valueWidth, Height), LongColor, flags, alpha);
         }
     }
 }
