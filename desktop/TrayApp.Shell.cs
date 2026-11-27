@@ -216,6 +216,7 @@ namespace CodexUsageDesktop {
             MouseEventHandler down = delegate(object sender, MouseEventArgs e) {
                 if (e.Button != MouseButtons.Left) return;
                 ((Control)sender).Capture = true;
+                RevealRingNow();
                 ballMouseDown = Cursor.Position; ballOrigin = Ball.Location; ballDragged = false;
             };
             MouseEventHandler move = delegate(object sender, MouseEventArgs e) {
@@ -297,6 +298,11 @@ namespace CodexUsageDesktop {
             opacityMenu.DropDownItems.Add(new ToolStripControlHost(opacityPanel) { AutoSize = false, Size = opacityPanel.Size });
             opacityMenu.DropDownOpening += delegate { if (Settings.CompactMode) SetMonitorExpanded(false); };
             ItemSnap = Check(items, "贴边吸附", Settings.EdgeSnap, delegate { Settings.EdgeSnap = ItemSnap.Checked; SnapMonitor(); SaveSettings(); });
+            ItemRingHide = Check(items, "圆环贴边自动隐藏（鼠标碰到滑出）", Settings.RingAutoHide, delegate {
+                Settings.RingAutoHide = ItemRingHide.Checked;
+                if (Settings.RingMode) { RevealRingNow(); SetMonitorExpanded(false); }
+                SaveSettings();
+            });
             var notifications = Item(items, "通知", null);
             ItemNotifications = Check(notifications.DropDownItems, "低额度提醒", Settings.NotificationsEnabled, delegate {
                 Settings.NotificationsEnabled = ItemNotifications.Checked;
@@ -463,7 +469,7 @@ namespace CodexUsageDesktop {
             if (DesktopRecoveryPending) RestoreDesktopLayout();
             if (!ballMouseDown.HasValue) {
                 Point before = Ball.Location;
-                DesktopIntegration.KeepVisible(Ball);
+                if (!RingTucked && !RingSliding) DesktopIntegration.KeepVisible(Ball);
                 DesktopIntegration.KeepVisible(Popup);
                 if (Ball.Location != before) RememberMonitorPosition();
             }
@@ -480,6 +486,7 @@ namespace CodexUsageDesktop {
 
         public void RestoreDesktopLayout() {
             if (ballMouseDown.HasValue) return;
+            RevealRingNow();
             DesktopIntegration.KeepVisible(Ball);
             DesktopIntegration.KeepVisible(Popup);
             RememberMonitorPosition();
@@ -503,7 +510,7 @@ namespace CodexUsageDesktop {
             Exiting = true;
             Log("Exiting tray.");
             SaveSettings();
-            foreach (var timer in new[] { PollTimer, PeriodicTimer, InitialTimer, StatusTimer, HoverTimer, ClientTimer }) { try { if (timer != null) timer.Stop(); } catch (Exception) { } }
+            foreach (var timer in new[] { PollTimer, PeriodicTimer, InitialTimer, StatusTimer, HoverTimer, ClientTimer, SlideTimer }) { try { if (timer != null) timer.Stop(); } catch (Exception) { } }
             try { if (Remote != null) Remote.Stop(); } catch (Exception) { }
             try { if (Worker != null && !Worker.HasExited) Worker.Kill(); } catch (Exception) { }
             try { if (NotifyIcon != null) { NotifyIcon.Visible = false; NotifyIcon.Dispose(); } } catch (Exception) { }

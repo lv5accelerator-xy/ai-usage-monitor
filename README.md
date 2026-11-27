@@ -20,8 +20,8 @@ Windows 桌面悬浮窗，同时显示两个 ChatGPT/Codex 账号（个人 + 工
 ## 当前版本
 
 <!-- CURRENT_VERSION_START -->
-**v2.3.0**
-悬浮窗重画为真正的磨砂玻璃：背景半透明并模糊背后的桌面，文字保持清晰不透明；右键 **磨砂玻璃效果** 可关闭。额度面板为不透明深色，iPhone 网页为玻璃材质。
+**v2.4.0**
+贴边圆环平时缩进屏幕边缘只露一条细边，鼠标碰到就滑出、移开后缩回；右键 **圆环贴边自动隐藏（鼠标碰到滑出）** 可关闭。
 <!-- CURRENT_VERSION_END -->
 
 完整更新记录见 [CHANGELOG](CHANGELOG.md)，各版本亮点见[版本亮点](docs/RELEASE_HIGHLIGHTS.md)。

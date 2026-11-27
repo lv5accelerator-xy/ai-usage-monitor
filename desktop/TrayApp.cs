@@ -38,6 +38,11 @@ namespace CodexUsageDesktop {
         readonly HashSet<string> recoveryRequests = new HashSet<string>();
         public double UiScale = 1, MonitorLayoutScale = 1, AppliedMonitorScale = 1;
         public Point? RestLocation;
+        // Ring mode: RingTucked is the slide target (true = tucked into the screen edge).
+        public bool RingTucked;
+        System.Windows.Forms.Timer SlideTimer;
+        Point slideFrom, slideTo;
+        DateTime slideStart;
         public DateTimeOffset? PointerLeftAt;
         Point? ballMouseDown, ballOrigin;
         bool ballDragged, layingOutCards;
@@ -77,7 +82,7 @@ namespace CodexUsageDesktop {
         public readonly List<CardState> CardStates = new List<CardState>();
         public readonly Dictionary<string, ToolStripMenuItem> SizeItems = new Dictionary<string, ToolStripMenuItem>();
         public readonly List<ToolStripMenuItem> ThresholdItems = new List<ToolStripMenuItem>();
-        public ToolStripMenuItem ItemCompact, ItemRings, ItemClear, ItemGlass, ItemSnap, ItemNotifications, ItemBallVisible, ItemTopMost, ItemStartup, ItemFullscreen, ClientStatusItem, CheckUpdateItem, RestartUpdateItem, ItemRecovery, ItemFailure, ItemBeta;
+        public ToolStripMenuItem ItemCompact, ItemRings, ItemClear, ItemGlass, ItemSnap, ItemRingHide, ItemNotifications, ItemBallVisible, ItemTopMost, ItemStartup, ItemFullscreen, ClientStatusItem, CheckUpdateItem, RestartUpdateItem, ItemRecovery, ItemFailure, ItemBeta;
         public TrackBar OpacitySlider;
         Label opacityLabel;
         public System.Windows.Forms.Timer HoverTimer, StatusTimer, PollTimer, PeriodicTimer, InitialTimer, ClientTimer;
@@ -266,6 +271,8 @@ namespace CodexUsageDesktop {
         void UpdateBallChrome() { Ball.Radius = B(14); Ball.HudUnit = (float)(B(100) / 100.0); }
 
         public void RememberMonitorPosition() {
+            // While tucked or sliding, RestLocation already holds the shown (docked) position.
+            if (RingTucked || RingSliding) return;
             int x = Ball.Left, y = Ball.Top;
             if (Settings.CompactMode && MonitorExpanded && Settings.DockVertical == "bottom") {
                 double collapsedScale = MonitorFitScale(BallWidth(), 64);
@@ -316,8 +323,85 @@ namespace CodexUsageDesktop {
                     index++;
                 }
             }
-            Ball.Location = DockedLocation(RestLocation ?? Ball.Location);
-            RememberMonitorPosition();
+            Point shown = DockedLocation(RestLocation ?? Ball.Location);
+            RestLocation = shown;
+            StopSlide();
+            string edge = TuckEdge(shown);
+            if (edge == null) RingTucked = false;
+            Ball.Location = RingTucked ? TuckedLocation(shown, edge) : shown;
+        }
+
+        public bool RingSliding { get { return SlideTimer != null && SlideTimer.Enabled; } }
+        public int RingPeek() { return Math.Max(3, B(7)); }
+
+        // The edge a docked ring window may tuck into, or null when auto-hide is off, the window
+        // floats, or the hidden part would land on another monitor or the taskbar.
+        public string TuckEdge(Point shown) {
+            if (!Settings.RingMode || !Settings.RingAutoHide) return null;
+            string edge = Settings.DockHorizontal != "none" ? Settings.DockHorizontal : Settings.DockVertical != "none" ? Settings.DockVertical : null;
+            if (edge == null) return null;
+            Rectangle area = Screen.FromRectangle(new Rectangle(shown, Ball.Size)).WorkingArea;
+            Rectangle tucked = new Rectangle(TuckedLocation(shown, edge), Ball.Size);
+            Rectangle hidden = edge == "left" ? Rectangle.FromLTRB(tucked.Left, tucked.Top, area.Left, tucked.Bottom)
+                : edge == "right" ? Rectangle.FromLTRB(area.Right, tucked.Top, tucked.Right, tucked.Bottom)
+                : edge == "top" ? Rectangle.FromLTRB(tucked.Left, tucked.Top, tucked.Right, area.Top)
+                : Rectangle.FromLTRB(tucked.Left, area.Bottom, tucked.Right, tucked.Bottom);
+            foreach (Screen screen in Screen.AllScreens) if (screen.Bounds.IntersectsWith(hidden)) return null;
+            return edge;
+        }
+
+        public Point TuckedLocation(Point shown, string edge) {
+            Rectangle area = Screen.FromRectangle(new Rectangle(shown, Ball.Size)).WorkingArea;
+            int peek = RingPeek();
+            if (edge == "left") return new Point(area.Left - Ball.Width + peek, shown.Y);
+            if (edge == "right") return new Point(area.Right - peek, shown.Y);
+            if (edge == "top") return new Point(shown.X, area.Top - Ball.Height + peek);
+            if (edge == "bottom") return new Point(shown.X, area.Bottom - peek);
+            return shown;
+        }
+
+        void StopSlide() { if (SlideTimer != null) SlideTimer.Stop(); }
+
+        void SlideBall(Point target, bool tuck) {
+            RingTucked = tuck;
+            if (Ball.Location == target && !RingSliding) return;
+            if (Smoke) { StopSlide(); Ball.Location = target; return; }
+            if (SlideTimer == null) {
+                SlideTimer = new System.Windows.Forms.Timer { Interval = 15 };
+                SlideTimer.Tick += delegate {
+                    double t = Math.Min(1, (DateTime.UtcNow - slideStart).TotalMilliseconds / 180.0);
+                    double eased = 1 - Math.Pow(1 - t, 3);
+                    Ball.Location = new Point(slideFrom.X + (int)Math.Round((slideTo.X - slideFrom.X) * eased), slideFrom.Y + (int)Math.Round((slideTo.Y - slideFrom.Y) * eased));
+                    if (t >= 1) SlideTimer.Stop();
+                };
+            }
+            slideFrom = Ball.Location; slideTo = target; slideStart = DateTime.UtcNow;
+            SlideTimer.Start();
+        }
+
+        // Shows a tucked ring window at once (drag start, display changes, leaving ring mode).
+        public void RevealRingNow() {
+            StopSlide();
+            if (!RingTucked) return;
+            RingTucked = false;
+            if (RestLocation.HasValue) Ball.Location = RestLocation.Value;
+        }
+
+        // Ring mode: tucked into the docked edge, slides out while the pointer is over the visible
+        // strip, the menu is open or the detail panel is showing; slides back 450 ms after leaving.
+        void UpdateRingTuck() {
+            if (!Ball.Visible || ballMouseDown.HasValue || !RestLocation.HasValue) return;
+            Point shown = RestLocation.Value;
+            string edge = TuckEdge(shown);
+            if (edge == null) { PointerLeftAt = null; if (RingTucked || RingSliding) SlideBall(shown, false); return; }
+            bool hold = Ball.Bounds.Contains(Cursor.Position) || Menu.Visible || Popup.Visible;
+            if (hold) {
+                PointerLeftAt = null;
+                if (RingTucked) SlideBall(shown, false);
+            } else if (!RingTucked) {
+                if (!PointerLeftAt.HasValue) PointerLeftAt = DateTimeOffset.Now;
+                if ((DateTimeOffset.Now - PointerLeftAt.Value).TotalMilliseconds >= 450) { PointerLeftAt = null; SlideBall(TuckedLocation(shown, edge), true); }
+            }
         }
 
         public void SetMonitorExpanded(bool expanded) {
@@ -328,6 +412,7 @@ namespace CodexUsageDesktop {
                 SetRingLayout();
                 return;
             }
+            RevealRingNow();
             RingPanel.Visible = false;
             if (!Settings.CompactMode) expanded = true;
             if (!RestLocation.HasValue) RememberMonitorPosition();
@@ -346,6 +431,7 @@ namespace CodexUsageDesktop {
         }
 
         public void SnapMonitor() {
+            RevealRingNow();
             Rectangle area = Screen.FromRectangle(Ball.Bounds).WorkingArea;
             SnapResult snap = Behavior.Snap(Ball.Left, Ball.Top, Ball.Width, Ball.Height, area.Left, area.Top, area.Right, area.Bottom, B(20), Settings.EdgeSnap);
             Ball.Location = new Point(snap.X, snap.Y);
@@ -355,7 +441,8 @@ namespace CodexUsageDesktop {
         }
 
         public void UpdateMonitorHover() {
-            if (Settings.RingMode || !Settings.CompactMode || !Ball.Visible || ballMouseDown.HasValue || Menu.Visible) return;
+            if (Settings.RingMode) { UpdateRingTuck(); return; }
+            if (!Settings.CompactMode || !Ball.Visible || ballMouseDown.HasValue || Menu.Visible) return;
             bool inside = Ball.Bounds.Contains(Cursor.Position);
             if (inside) {
                 PointerLeftAt = null;
@@ -393,6 +480,7 @@ namespace CodexUsageDesktop {
         }
 
         public void ResetUiPositions() {
+            RevealRingNow();
             Ball.Location = DefaultBallLocation();
             Settings.DockHorizontal = "none"; Settings.DockVertical = "none";
             RememberMonitorPosition();
