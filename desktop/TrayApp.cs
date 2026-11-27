@@ -83,7 +83,7 @@ namespace CodexUsageDesktop {
         public readonly Dictionary<string, ToolStripMenuItem> SizeItems = new Dictionary<string, ToolStripMenuItem>();
         public readonly List<ToolStripMenuItem> ThresholdItems = new List<ToolStripMenuItem>();
         public ToolStripMenuItem ItemCompact, ItemRings, ItemClear, ItemGlass, ItemSnap, ItemRingHide, ItemNotifications, ItemBallVisible, ItemTopMost, ItemStartup, ItemFullscreen, ClientStatusItem, CheckUpdateItem, RestartUpdateItem, ItemRecovery, ItemFailure, ItemBeta;
-        public TrackBar OpacitySlider;
+        public ElasticSlider OpacitySlider;
         Label opacityLabel;
         public System.Windows.Forms.Timer HoverTimer, StatusTimer, PollTimer, PeriodicTimer, InitialTimer, ClientTimer;
         public const int RefreshIntervalMs = 60000;
@@ -98,6 +98,7 @@ namespace CodexUsageDesktop {
 
         public TrayApp(string dataDir, bool smoke) {
             Smoke = smoke;
+            Motion.Instant = smoke;
             DataDir = dataDir;
             LogDir = Path.Combine(dataDir, "logs");
             CachePath = Path.Combine(LogDir, "usage-result.json");

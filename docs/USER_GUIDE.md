@@ -67,6 +67,17 @@ The floating monitor is a real frosted-glass pane: its dark background is transl
 
 The detail panel uses the same colours, rounded cards, capsule bars and buttons but stays opaque: it is built from standard Windows controls, which cannot safely sit on a blurred background (v2.2.0 tried, and cards turned white with haloed text; v2.2.1 removed that blur).
 
+## Follow the light (v2.5.0)
+
+- **Light rim.** Hovering over the floating monitor lights its rim with a travelling blue-violet-amber light; in ring mode the ring under the pointer gets its own lit cell. A manual refresh ends with one cool sweep; a quota newly dropping to 10% or below triggers one warm (orange-red) sweep.
+- **Breathing rings.** While quotas are being read, the ring arcs breathe and a short comet circles each track.
+- **Skeletons.** Until the first read finishes, rings and the compact strip show shimmering placeholders instead of dashes.
+- **Chart switch.** In each card's local-usage block, the **7 天用量 / 额度曲线** switch toggles every card between the seven-day token wave bars (rising one after another, today's bar glowing) and a heartbeat line of the 5-hour window's remaining quota over the last five hours, with a pulsing dot on the latest read. The choice is saved.
+- **Toast cards.** Notifications appear as the app's own cards sliding in at the bottom-right (left of the monitor if it is there), with a lit rim (warm for warnings). They never take keyboard focus, stay while hovered, fade after about seven seconds, and open the detail panel when clicked; at most three show at once. Over full-screen apps the quieter Windows notification is used instead.
+- **Elastic slider.** The **紧凑小窗透明度** slider's thumb stretches while dragged, rubber-bands past either end and springs back on release.
+
+Animation runs only while something moves (hover, reading, a sweep, an open panel); otherwise the monitor is static.
+
 ## Compact transparency (v0.4.2): adjustable compact transparency and one-minute refresh
 
 The monitor defaults to **清晰模式（紧凑条不额外透明）** for readable text. Disable this right-click option to restore the saved transparency: **紧凑小窗透明度** selects **0–60% transparency**, initially 20%. Clear mode disables the slider and preserves its saved value. Windows opacity affects the entire window, including text; the expanded monitor and detail panel remain fully opaque (the glass background of the monitor is translucent per pixel regardless). **悬浮窗大小 → 小 / 中 / 大** selects a preferred 100%, 120%, or 140% size independently of monitor DPI, including the rings, compact strip and expanded monitor. If a small display cannot fit that size, the window scales down to its working area while keeping the saved preference. Both preferences survive restarts.

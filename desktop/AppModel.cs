@@ -840,7 +840,7 @@ namespace CodexUsageDesktop {
         public int PanelWidth = 440, PanelHeight = 840, CompactOpacity = 80;
         public bool TopMost = true, BallVisible = true, SetupSeen, HideFullscreen, RingMode, CompactMode = true, ClearMode = true, EdgeSnap = true, NotificationsEnabled;
         public bool RecoveryNotifications = true, FailureNotifications = true, GlassEffect = true, RingAutoHide = true;
-        public string MonitorSize = "small", DockHorizontal = "none", DockVertical = "none", UpdateChannel = "stable";
+        public string ChartMode = "tokens", MonitorSize = "small", DockHorizontal = "none", DockVertical = "none", UpdateChannel = "stable";
         public int[] NotificationThresholds = { 20, 10 };
 
         static int? Int(object value) { double? n = J.Num(value); return n.HasValue ? (int?)(int)Math.Round(n.Value) : null; }
@@ -863,6 +863,7 @@ namespace CodexUsageDesktop {
             s.FailureNotifications = BoolOr(value, "failureNotifications", true);
             s.GlassEffect = BoolOr(value, "glassEffect", true);
             s.RingAutoHide = BoolOr(value, "ringAutoHide", true);
+            s.ChartMode = J.Text(J.Get(value, "chartMode")) == "quota" ? "quota" : "tokens";
             s.UpdateChannel = J.Text(J.Get(value, "updateChannel")) == "beta" ? "beta" : "stable";
             s.CompactOpacity = Math.Max(40, Math.Min(100, Int(J.Get(value, "compactOpacity")) ?? 80));
             string size = J.Text(J.Get(value, "monitorSize"));
@@ -882,7 +883,7 @@ namespace CodexUsageDesktop {
                 { "topMost", TopMost }, { "ballVisible", BallVisible }, { "setupSeen", SetupSeen }, { "hideFullscreen", HideFullscreen }, { "ringMode", RingMode },
                 { "compactMode", CompactMode }, { "compactOpacity", CompactOpacity }, { "clearMode", ClearMode }, { "monitorSize", MonitorSize }, { "edgeSnap", EdgeSnap },
                 { "dockHorizontal", DockHorizontal }, { "dockVertical", DockVertical }, { "notificationsEnabled", NotificationsEnabled }, { "notificationThresholds", NotificationThresholds },
-                { "recoveryNotifications", RecoveryNotifications }, { "failureNotifications", FailureNotifications }, { "updateChannel", UpdateChannel }, { "glassEffect", GlassEffect }, { "ringAutoHide", RingAutoHide }
+                { "recoveryNotifications", RecoveryNotifications }, { "failureNotifications", FailureNotifications }, { "updateChannel", UpdateChannel }, { "glassEffect", GlassEffect }, { "ringAutoHide", RingAutoHide }, { "chartMode", ChartMode }
             };
         }
 

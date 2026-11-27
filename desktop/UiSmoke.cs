@@ -55,6 +55,7 @@ namespace CodexUsageDesktop {
                 ClientStatus();
                 Rings();
                 Claude();
+                ToastCards();
                 Memory();
                 app.SaveSettings();
                 Check(Snapshot(Path.Combine(app.DataDir, "ui-settings.json")) == settingsBefore, "Smoke mode never writes user preferences.");
@@ -401,6 +402,7 @@ namespace CodexUsageDesktop {
                 foreach (QuotaRing ring in app.RingCells.Values.Where(r => r.Visible)) Check(app.RingPanel.ClientRectangle.Contains(ring.Bounds), "Every ring fits its panel.");
                 Shot(app.Ball, "rings-" + edge + ".png");
             }
+            MotionEffects();
             RingAutoHide();
             int originalDpi = app.Ball.DisplayDpi;
             try {
@@ -480,6 +482,95 @@ namespace CodexUsageDesktop {
             app.RevealRingNow();
         }
 
+        static int Diff(Bitmap a, Bitmap b) {
+            int count = 0;
+            for (int y = 0; y < Math.Min(a.Height, b.Height); y += 1)
+                for (int x = 0; x < Math.Min(a.Width, b.Width); x += 1)
+                    if (a.GetPixel(x, y).ToArgb() != b.GetPixel(x, y).ToArgb()) count++;
+            return count;
+        }
+
+        // Light rim, breathing, skeleton and sweep on the floating monitor (ring mode).
+        static void MotionEffects() {
+            QuotaRing first = app.RingCells["personal-five"];
+            using (Bitmap plain = app.Ball.RenderComposite()) {
+                app.Ball.GlowLevel = 1; app.Ball.GlowPhase = 0.125;
+                first.HoverLevel = 1; first.Phase = 0.125;
+                using (Bitmap lit = app.Ball.RenderComposite()) Check(Diff(plain, lit) > 200, "The travelling light draws on the rim and the hovered ring.");
+                Shot(app.Ball, "rings-light.png");
+                app.Ball.GlowLevel = 0; first.HoverLevel = 0;
+                first.Breathing = true; first.Clock = 0.4;
+                using (Bitmap breathing = app.Ball.RenderComposite()) Check(Diff(plain, breathing) > 20, "Breathing draws the comet on the ring track.");
+                Shot(app.Ball, "rings-breathing.png");
+                first.Breathing = false;
+            }
+            object saved = app.LastData;
+            app.LastData = null;
+            app.UpdateBallSummary(D("profiles", new object[] { D("id", "personal", "label", "个人账号", "ok", true, "pending", true), D("id", "work", "label", "工作账号", "ok", true, "pending", true) }));
+            Check(first.Loading && first.Value == -1 && app.CompactCells["personal"].Loading, "The first read shows skeleton placeholders, never 0%.");
+            Shot(app.Ball, "rings-loading.png");
+            app.LastData = saved;
+            app.UpdateBallSummary(app.LastData);
+            Check(!first.Loading && !app.CompactCells["personal"].Loading, "Skeletons clear once data arrives.");
+            app.TriggerSweep(true);
+            app.StepMotion(false);
+            Check(app.SweepActive && app.Ball.GlowWarm, "A low-quota sweep lights the rim in warm colours.");
+            System.Threading.Thread.Sleep((int)(TrayApp.SweepSeconds * 1000) + 120);
+            app.StepMotion(false);
+            Check(!app.SweepActive && app.Ball.GlowLevel == 0 && app.HoverGlow == 0, "The sweep ends and the monitor returns to rest.");
+            Check(app.NoteLowQuota("t|five", 8, false) && !app.NoteLowQuota("t|five", 7, false) && !app.NoteLowQuota("t|five", 50, false) && app.NoteLowQuota("t|five", 9, false) && !app.NoteLowQuota("t|long", 5, true), "Low-quota sweeps fire once per crossing, never for stale data.");
+        }
+
+        // Segmented switch, wave bars and heartbeat line in the detail cards.
+        static void Charts() {
+            app.Popup.Show();
+            app.RenderData(app.LastData);
+            Pump();
+            var tree = TrayApp.Tree(app.ContentPanel.Controls[0]).ToList();
+            var sw = tree.OfType<SegmentedSwitch>().Single();
+            var bars = tree.OfType<UsageSparkline>().Single();
+            var line = tree.OfType<HeartbeatChart>().Single();
+            Check(sw.SelectedIndex == 0 && bars.Visible && !line.Visible, "Token wave bars show by default.");
+            Check(line.PointCount >= 20, "The heartbeat line holds the recent 5-hour readings: " + line.PointCount);
+            Check(sw.Right <= sw.Parent.ClientSize.Width && sw.Bottom <= sw.Parent.ClientSize.Height, "The segmented switch fits its row.");
+            Shot(app.ContentPanel.Controls[0], "card-wave-bars.png");
+            sw.SelectedIndex = 1;
+            Pump();
+            Check(app.Settings.ChartMode == "quota" && line.Visible && !bars.Visible && sw.Parent.Text.StartsWith("5 小时额度曲线"), "The switch shows the quota heartbeat line.");
+            Check(app.ChartBlocks.All(b => b.Switch.SelectedIndex == 1 && b.Line.Visible), "Every card follows the chart switch.");
+            Shot(app.ContentPanel.Controls[0], "card-heartbeat.png");
+            app.RenderData(app.LastData);
+            Pump();
+            Check(TrayApp.Tree(app.ContentPanel.Controls[0]).OfType<SegmentedSwitch>().Single().SelectedIndex == 1, "The chosen chart survives refreshes.");
+            app.ChartBlocks[0].Switch.SelectedIndex = 0;
+            Pump();
+            Check(app.Settings.ChartMode == "tokens" && app.ChartBlocks.All(b => b.Switch.SelectedIndex == 0), "Switching back restores the token bars.");
+            Check(UiSettings.FromObject(app.Settings.ToObject(), 440, 840).ChartMode == "tokens" && UiSettings.FromObject(J.Parse("{\"chartMode\":\"quota\"}"), 440, 840).ChartMode == "quota", "The chart choice is saved.");
+            Check(Motion.Count == 0, "Smoke mode keeps the animation clock idle.");
+        }
+
+        // The app's own toast cards.
+        static void ToastCards() {
+            var a = app.ShowToast("额度消耗预警", "工作账号 · 5 小时额度按当前速度预计 15:40 用完", true);
+            var b = app.ShowToast("额度已恢复", "个人账号 5 小时额度已恢复到 100%", false);
+            Pump();
+            Rectangle area = Screen.FromRectangle(a.Bounds).WorkingArea;
+            Check(app.Toasts.Count == 2 && a.Visible && b.Visible, "Toast cards show.");
+            Check(area.Contains(a.Bounds) && area.Contains(b.Bounds), "Toasts stay on the working area.");
+            Check(b.Top >= a.Bottom || a.Top >= b.Bottom, "Toasts stack without overlapping.");
+            Check(b.Top > a.Top, "The newest toast sits at the bottom.");
+            Check(Form.ActiveForm != a && Form.ActiveForm != b, "Toasts never take focus.");
+            Check(a.TextBounds.Bottom <= a.ClientSize.Height && a.TextBounds.Right <= a.ClientSize.Width, "Toast text fits the card.");
+            Shot(a, "toast-warning.png");
+            Shot(b, "toast-info.png");
+            for (int i = 0; i < 3; i++) app.ShowToast("测试 " + i, "第 " + i + " 条", false);
+            Pump();
+            Check(app.Toasts.Count(t => !t.Leaving) <= 3, "At most three toasts stay on screen.");
+            foreach (GlowToast toast in app.Toasts.ToList()) toast.Close();
+            Pump();
+            Check(app.Toasts.Count == 0, "Closed toasts are released.");
+        }
+
         static void Claude() {
             var claude = D("id", "claude", "label", "Claude", "provider", "claude", "ok", true, "planType", "Max 5x", "fetchedAt", fixtureTime, "quotaError", null,
                 "fiveHour", D("kind", "5h", "label", "5 小时", "remainingPercent", 80, "resetsAt", resetTime),
@@ -536,6 +627,7 @@ namespace CodexUsageDesktop {
             for (int m = 20; m >= 0; m--) {
                 Forecasts.AddSamples(app.UsageHistory, D("profiles", new object[] { D("id", "personal", "ok", true, "fetchedAt", DateTimeOffset.Now.AddMinutes(-m).ToString("o"), "fiveHour", D("remainingPercent", 49 + m * 0.5, "resetsAt", resetTime)) }), DateTimeOffset.Now);
             }
+            Charts();
             app.UpdateStatus(false);
             var five = Resets("personal", "fiveHour");
             Check(five.Count == 1 && five[0].Text.Contains("用完") && five[0].ForeColor.ToArgb() == app.Warning.ToArgb(), "Card reset line shows the amber exhaustion forecast: " + (five.Count > 0 ? five[0].Text : "none"));

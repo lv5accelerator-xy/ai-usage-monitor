@@ -17,6 +17,7 @@ namespace CodexUsageDesktop {
         void ClearContent() {
             ResetLabels.Clear();
             CardStates.Clear();
+            ChartBlocks.Clear();
             while (ContentPanel.Controls.Count > 0) {
                 Control control = ContentPanel.Controls[0];
                 ContentPanel.Controls.RemoveAt(0);
@@ -54,26 +55,87 @@ namespace CodexUsageDesktop {
             parent.SetColumnSpan(grid, 2);
         }
 
-        // Local usage block: one summary line plus a seven-day trend chart (58 + 46 logical px).
+        // Local usage block (58 + 46 logical px): a two-line summary with a segmented switch in
+        // its top-right corner, and a chart. "7 天用量" shows the seven-day token wave bars,
+        // "额度曲线" the 5-hour remaining quota of the last five hours as a heartbeat line.
+        public sealed class ChartBlock { public Label Summary; public SegmentedSwitch Switch; public UsageSparkline Bars; public HeartbeatChart Line; public string TokensText, QuotaText, TokensTip, QuotaTip; public bool Empty; }
+        public readonly List<ChartBlock> ChartBlocks = new List<ChartBlock>();
+
         void AddLocalUsageRows(TableLayoutPanel parent, object profile, int row, Color accent) {
             string provider = Model.IsClaude(profile) ? "claude" : "codex";
             object usage = J.Get(profile, "localUsage");
             string detail = Model.LocalUsageDetail(usage, provider);
             string title = provider == "codex" ? "本机 Codex 用量" : "本机 Claude Code 用量";
-            AddRow(parent, 58);
             bool empty = Model.LocalUsageEmpty(usage);
-            Label local = NewLabel(title + "\r\n" + Model.LocalUsageSummary(usage, provider), 9, true);
-            parent.Controls.Add(local, 0, row);
-            parent.SetColumnSpan(local, 2);
-            ToolTip.SetToolTip(local, detail);
+            Forecast forecast = ProfileForecast(profile, "fiveHour");
+            var block = new ChartBlock {
+                Empty = empty,
+                TokensText = title + "\r\n" + Model.LocalUsageSummary(usage, provider), TokensTip = detail,
+                QuotaText = "5 小时额度曲线\r\n" + Forecasts.Detail(forecast).Replace("消耗预测：", ""),
+                QuotaTip = "最近 5 小时内 5 小时窗口的剩余额度（每分钟一个读数）。\r\n" + Forecasts.Detail(forecast)
+            };
+            AddRow(parent, 58);
+            block.Summary = NewLabel(block.TokensText, 9, true);
+            parent.Controls.Add(block.Summary, 0, row);
+            parent.SetColumnSpan(block.Summary, 2);
+            block.Switch = new SegmentedSwitch { Items = new[] { "7 天用量", "额度曲线" }, Font = UiFont(8), Size = new Size(U(128), U(22)), Anchor = AnchorStyles.Top | AnchorStyles.Right, BackColor = CardBack, TrackColor = PopupBack, PillColor = Html("#545458"), TextColor = TextPrimary, MutedColor = TextMuted, AccessibleName = title + "：图表切换" };
+            block.Summary.Controls.Add(block.Switch);
+            block.Switch.SelectedIndexChanged += delegate {
+                string mode = block.Switch.SelectedIndex == 1 ? "quota" : "tokens";
+                if (Settings.ChartMode == mode) return;
+                Settings.ChartMode = mode;
+                ApplyChartMode();
+                SaveSettings();
+            };
             AddRow(parent, 46);
+            var holder = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, U(4), 0, U(2)), BackColor = CardBack };
             UsageTrend trend = Model.Trend(usage, DateTime.Today);
-            var chart = new UsageSparkline { Dock = DockStyle.Fill, Margin = new Padding(0, U(4), 0, U(2)), BarColor = accent, TrackColor = Track, CaptionColor = Caption, HighlightIndex = trend.Highlight, AccessibleName = title + " 近 7 天趋势" };
-            chart.SetData(trend.Values, trend.Labels);
-            chart.Visible = !empty;
-            parent.Controls.Add(chart, 0, row + 1);
-            parent.SetColumnSpan(chart, 2);
-            ToolTip.SetToolTip(chart, detail);
+            block.Bars = new UsageSparkline { Dock = DockStyle.Fill, BarColor = accent, TrackColor = Track, CaptionColor = Caption, HighlightIndex = trend.Highlight, AccessibleName = title + " 近 7 天趋势" };
+            block.Bars.SetData(trend.Values, trend.Labels);
+            block.Line = new HeartbeatChart { Dock = DockStyle.Fill, LineColor = accent, GridColor = Track, CaptionColor = Caption, AccessibleName = "5 小时额度曲线" };
+            SetHeartbeatData(block.Line, J.Text(J.Get(profile, "id")));
+            holder.Controls.Add(block.Bars);
+            holder.Controls.Add(block.Line);
+            parent.Controls.Add(holder, 0, row + 1);
+            parent.SetColumnSpan(holder, 2);
+            ToolTip.SetToolTip(block.Bars, detail);
+            ToolTip.SetToolTip(block.Line, block.QuotaTip);
+            ChartBlocks.Add(block);
+            ApplyChartMode(block, false);
+            block.Summary.Resize += delegate { block.Switch.Location = new Point(Math.Max(0, block.Summary.ClientSize.Width - block.Switch.Width), 0); };
+        }
+
+        // Samples of the 5-hour window from the last five hours, oldest first, as 0-1 time.
+        void SetHeartbeatData(HeartbeatChart chart, string id) {
+            List<UsageSample> list;
+            double now = DateTimeOffset.Now.ToUnixTimeSeconds(), span = 5 * 3600;
+            var xs = new List<double>();
+            var ys = new List<double>();
+            if (UsageHistory != null && UsageHistory.TryGetValue(id + "|fiveHour", out list))
+                foreach (UsageSample sample in list) if (sample.T >= now - span && sample.T <= now + 60) { xs.Add(1 - (now - sample.T) / span); ys.Add(sample.R); }
+            chart.SetData(xs.ToArray(), ys.ToArray());
+        }
+
+        // A user switch animates every card's pill and replays the newly shown charts.
+        public void ApplyChartMode() {
+            foreach (ChartBlock block in ChartBlocks) {
+                ApplyChartMode(block, true);
+                if (block.Bars.Visible) block.Bars.Replay();
+                if (block.Line.Visible) block.Line.Replay();
+            }
+        }
+
+        public void ReplayCharts() {
+            foreach (ChartBlock block in ChartBlocks) { if (block.Bars.Visible) block.Bars.Replay(); if (block.Line.Visible) block.Line.Replay(); }
+        }
+
+        void ApplyChartMode(ChartBlock block, bool animate) {
+            bool quota = Settings.ChartMode == "quota";
+            block.Switch.Select(quota ? 1 : 0, animate, false);
+            block.Summary.Text = quota ? block.QuotaText : block.TokensText;
+            ToolTip.SetToolTip(block.Summary, quota ? block.QuotaTip : block.TokensTip);
+            block.Bars.Visible = !quota && !block.Empty;
+            block.Line.Visible = quota;
         }
 
         void AddAccountCard(Dictionary<string, object> profile) {
@@ -189,6 +251,7 @@ namespace CodexUsageDesktop {
         // ---------------------------------------------------------------- summary (floating monitor)
         public void UpdateBallSummary(object data) {
             DateTimeOffset now = DateTimeOffset.Now;
+            KickMotion();
             bool errorShown = data != null || !string.IsNullOrEmpty(RefreshError);
             foreach (string id in Model.AccountIds) {
                 object profile = Model.DisplayProfile(data, id);
@@ -197,6 +260,9 @@ namespace CodexUsageDesktop {
                 QuotaPair pair = Model.Pair(profile);
                 bool stale = Model.Stale(profile, now) || !string.IsNullOrEmpty(RefreshError);
                 string account = AccountName(id);
+                // First read still running: skeleton placeholders instead of dashes.
+                bool loading = string.IsNullOrEmpty(RefreshError) && (LastData == null || J.Bool(J.Get(profile, "pending")));
+                if (NoteLowQuota(id + "|five", pair.FiveHour, stale) | NoteLowQuota(id + "|long", pair.LongTerm, stale)) TriggerSweep(true);
                 cells.Name.Text = account;
                 cells.Five.Text = Model.Percent(pair.FiveHour);
                 cells.Long.Text = Model.Percent(pair.LongTerm);
@@ -226,6 +292,7 @@ namespace CodexUsageDesktop {
                     if (!RingCells.TryGetValue(id + "-" + window, out ring)) continue;
                     double? value = window == "five" ? pair.FiveHour : pair.LongTerm;
                     ring.Value = value ?? -1;
+                    ring.Loading = loading && !value.HasValue;
                     ring.Stale = stale;
                     ring.Caption = account + "\n" + (window == "five" ? "5h" : "长周期");
                     ring.ForeColor = ValueColor(value, stale);
@@ -251,6 +318,7 @@ namespace CodexUsageDesktop {
                     label.AccountName = account + (stale && data != null ? " !" : "");
                     label.FiveText = Model.Percent(pair.FiveHour);
                     label.LongText = Model.Percent(pair.LongTerm);
+                    label.Loading = loading && !pair.FiveHour.HasValue && !pair.LongTerm.HasValue;
                     label.ForeColor = stale ? Warning : TextPrimary;
                     label.FiveColor = ValueColor(pair.FiveHour, stale);
                     label.LongColor = ValueColor(pair.LongTerm, stale);
@@ -358,6 +426,7 @@ namespace CodexUsageDesktop {
 
         public void RenderError(string message) {
             RefreshError = message ?? "";
+            ManualRefresh = false;
             TrackRefreshError(DateTimeOffset.Now);
             if (LastData == null) RenderData(PlaceholderData(false, message));
             UpdateStatus(false);
@@ -373,6 +442,7 @@ namespace CodexUsageDesktop {
             RefreshStarted = DateTimeOffset.Now;
             RefreshButton.Enabled = false;
             RefreshButton.Text = "更新中";
+            KickMotion();
             if (LastData == null) ShowLoading();
             UpdateStatus(false);
             try {
@@ -424,6 +494,7 @@ namespace CodexUsageDesktop {
                 if (J.Arr(J.Get(data, "profiles")).Length == 0) throw new InvalidDataException("未配置账号，请检查 profiles.json。");
                 if (ReadRevision != ProfileRevision) { StartRefresh(); return; }
                 AcceptData(data, true);
+                if (ManualRefresh) { ManualRefresh = false; TriggerSweep(false); }
                 Log("Refresh result rendered.");
             } catch (Exception ex) {
                 Log("Refresh error: " + ex.Message);
@@ -462,6 +533,14 @@ namespace CodexUsageDesktop {
             if (Smoke) { SmokeBalloons.Add(title + "|" + text); return; }
             if (NotifyIcon == null) return;
             Log("Notification shown: " + title + " | " + text.Replace("\r\n", " / "));
+            // Own toast card, except over full-screen apps (games, presentations), where the
+            // quieter system notification is used instead.
+            bool fullscreen = false;
+            try { fullscreen = DesktopIntegration.FullScreenOn(Ball); } catch (Exception) { }
+            if (!fullscreen) {
+                try { ShowToast(title, text, icon == ToolTipIcon.Warning); return; }
+                catch (Exception ex) { Log("Toast fallback: " + ex.Message); }
+            }
             NotifyIcon.ShowBalloonTip(8000, title, text, icon);
         }
 

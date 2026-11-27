@@ -97,6 +97,7 @@ namespace CodexUsageDesktop {
         void BuildPopup() {
             Popup = new DpiForm { DisplayDpi = (int)(UiScale * 96), Text = "Codex + Claude 额度", Icon = AppIcon, AutoScaleMode = AutoScaleMode.None, FormBorderStyle = FormBorderStyle.SizableToolWindow, ShowInTaskbar = false, TopMost = Settings.TopMost, BackColor = PopupBack, StartPosition = FormStartPosition.Manual };
             Popup.Font = UiFont(10);
+            Popup.VisibleChanged += delegate { if (Popup.Visible) ReplayCharts(); };
             Popup.MinimumSize = new Size(U(380), U(360));
             int width = Math.Max(U(380), Settings.PanelWidth), height = Math.Max(U(360), Settings.PanelHeight);
             Point saved = new Point(Settings.PanelX ?? 0, Settings.PanelY ?? 0);
@@ -122,7 +123,7 @@ namespace CodexUsageDesktop {
             header.Controls.Add(title, 0, 0);
             header.Controls.Add(subtitle, 0, 1);
             RefreshButton = NewButton("刷新");
-            RefreshButton.Click += delegate { StartRefresh(); };
+            RefreshButton.Click += delegate { ManualRefresh = true; StartRefresh(); };
             header.Controls.Add(RefreshButton, 1, 0);
             root.Controls.Add(header, 0, 0);
             ContentPanel = new Panel { Dock = DockStyle.Fill, AutoScroll = false, Margin = new Padding(0), Padding = new Padding(U(16), 0, U(16), 0) };
@@ -286,7 +287,7 @@ namespace CodexUsageDesktop {
             AddRow(opacityLayout, 42);
             opacityLabel = NewLabel("透明度：" + (100 - Settings.CompactOpacity) + "%", 9, false);
             opacityLayout.Controls.Add(opacityLabel, 0, 0);
-            OpacitySlider = new TrackBar { Dock = DockStyle.Fill, Minimum = 0, Maximum = 60, TickFrequency = 10, SmallChange = 5, LargeChange = 10, Value = Math.Max(0, Math.Min(60, 100 - Settings.CompactOpacity)), AccessibleName = "紧凑小窗透明度，0% 到 60%", BackColor = CardBack };
+            OpacitySlider = new ElasticSlider { Dock = DockStyle.Fill, Margin = new Padding(U(4), U(6), U(4), U(6)), Minimum = 0, Maximum = 60, SmallChange = 5, LargeChange = 10, Value = Math.Max(0, Math.Min(60, 100 - Settings.CompactOpacity)), AccessibleName = "紧凑小窗透明度，0% 到 60%", BackColor = CardBack, AccentColor = MenuSelect, TrackColor = Track };
             OpacitySlider.ValueChanged += delegate {
                 Settings.CompactOpacity = 100 - OpacitySlider.Value;
                 opacityLabel.Text = "透明度：" + OpacitySlider.Value + "%";
@@ -330,7 +331,7 @@ namespace CodexUsageDesktop {
             ItemFailure = Check(notifications.DropDownItems, "读取异常提醒（连续 15 分钟失败）", Settings.FailureNotifications, delegate { Settings.FailureNotifications = ItemFailure.Checked; SaveSettings(); });
             items.Add(new ToolStripSeparator());
             Item(items, "展开 / 收起额度面板", delegate { TogglePopup(); });
-            Item(items, "立即刷新", delegate { StartRefresh(); });
+            Item(items, "立即刷新", delegate { ManualRefresh = true; StartRefresh(); });
             ItemBallVisible = Check(items, "显示悬浮面板", Settings.BallVisible, delegate {
                 AutoHidden = false;
                 Settings.BallVisible = ItemBallVisible.Checked;
@@ -402,7 +403,9 @@ namespace CodexUsageDesktop {
             ClientTimer.Tick += delegate { UpdateClientStatus(); };
             if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CODEX_USAGE_CLIENT_VERSION"))) ClientTimer.Start();
             HoverTimer = new System.Windows.Forms.Timer { Interval = 150 };
-            HoverTimer.Tick += delegate { UpdateMonitorHover(); };
+            HoverTimer.Tick += delegate { UpdateMonitorHover(); if (Ball.Visible && Ball.Bounds.Contains(Cursor.Position)) KickMotion(); };
+            MotionTimer = new System.Windows.Forms.Timer { Interval = 33 };
+            MotionTimer.Tick += delegate { StepMotion(); };
             HoverTimer.Start();
             StatusTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             StatusTimer.Tick += delegate { UpdateStatus(true); UpdateDesktopExperience(); UpdateRemoteNotifications(); };
@@ -510,7 +513,8 @@ namespace CodexUsageDesktop {
             Exiting = true;
             Log("Exiting tray.");
             SaveSettings();
-            foreach (var timer in new[] { PollTimer, PeriodicTimer, InitialTimer, StatusTimer, HoverTimer, ClientTimer, SlideTimer }) { try { if (timer != null) timer.Stop(); } catch (Exception) { } }
+            foreach (var timer in new[] { PollTimer, PeriodicTimer, InitialTimer, StatusTimer, HoverTimer, ClientTimer, SlideTimer, MotionTimer }) { try { if (timer != null) timer.Stop(); } catch (Exception) { } }
+            foreach (GlowToast toast in Toasts.ToList()) { try { toast.Close(); } catch (Exception) { } }
             try { if (Remote != null) Remote.Stop(); } catch (Exception) { }
             try { if (Worker != null && !Worker.HasExited) Worker.Kill(); } catch (Exception) { }
             try { if (NotifyIcon != null) { NotifyIcon.Visible = false; NotifyIcon.Dispose(); } } catch (Exception) { }
