@@ -379,6 +379,8 @@ namespace CodexUsageDesktop {
             var ringSample = Clone(sample);
             app.LastData = Model.Merge(null, ringSample);
             app.RenderData(app.LastData);
+            // Auto-hide is exercised separately below; keep hover ticks from tucking during layout checks.
+            app.Settings.RingAutoHide = false;
             app.ItemRings.PerformClick();
             Check(app.Settings.RingMode, "Menu enables ring mode.");
             foreach (string edge in new[] { "left", "right", "top", "bottom" }) {
@@ -399,6 +401,7 @@ namespace CodexUsageDesktop {
                 foreach (QuotaRing ring in app.RingCells.Values.Where(r => r.Visible)) Check(app.RingPanel.ClientRectangle.Contains(ring.Bounds), "Every ring fits its panel.");
                 Shot(app.Ball, "rings-" + edge + ".png");
             }
+            RingAutoHide();
             int originalDpi = app.Ball.DisplayDpi;
             try {
                 foreach (int dpi in new[] { 96, 120, 144, 192 }) {
@@ -437,6 +440,44 @@ namespace CodexUsageDesktop {
             Check(app.Settings.DockHorizontal == "none" && app.Settings.DockVertical == "none", "Reset lets ring mode float.");
             app.ItemRings.PerformClick();
             Check(!app.Settings.RingMode && app.CompactGrid.Visible, "Menu restores compact mode.");
+        }
+
+        static void RingAutoHide() {
+            app.Settings.DockHorizontal = "right"; app.Settings.DockVertical = "none";
+            app.Settings.RingAutoHide = true;
+            app.RingTucked = false;
+            app.SetMonitorExpanded(false);
+            Rectangle area = Screen.FromRectangle(app.Ball.Bounds).WorkingArea;
+            Point shown = app.RestLocation.Value;
+            Check(app.Ball.Right == area.Right, "Ring starts shown before it tucks.");
+            bool edgeFree = app.TuckEdge(shown) == "right";
+            app.Popup.Hide();
+            Point cursor = Cursor.Position;
+            try {
+                Point away = new Point(area.Left + area.Width / 3, area.Top + area.Height / 2);
+                Cursor.Position = away;
+                if (edgeFree && Cursor.Position == away) {
+                    app.UpdateMonitorHover();
+                    app.PointerLeftAt = DateTimeOffset.Now.AddSeconds(-1);
+                    app.UpdateMonitorHover();
+                    Check(app.RingTucked && app.Ball.Left == area.Right - app.RingPeek(), "Ring tucks into the right edge after the pointer leaves.");
+                    Check(app.RestLocation.Value == shown, "Tucking keeps the shown position for saving and re-layout.");
+                    app.SetMonitorExpanded(false);
+                    Check(app.RingTucked && app.Ball.Left == area.Right - app.RingPeek(), "Re-layout keeps a tucked ring tucked.");
+                    Point strip = new Point(area.Right - 1, app.Ball.Top + app.Ball.Height / 2);
+                    Cursor.Position = strip;
+                    if (Cursor.Position == strip) {
+                        app.UpdateMonitorHover();
+                        Check(!app.RingTucked && app.Ball.Location == shown, "Touching the visible strip slides the ring out.");
+                    }
+                    app.Settings.RingAutoHide = false;
+                    app.RingTucked = true;
+                    app.UpdateMonitorHover();
+                    Check(!app.RingTucked && app.Ball.Location == shown, "Turning auto-hide off brings the ring back.");
+                }
+            } finally { Cursor.Position = cursor; }
+            app.Settings.RingAutoHide = false;
+            app.RevealRingNow();
         }
 
         static void Claude() {
