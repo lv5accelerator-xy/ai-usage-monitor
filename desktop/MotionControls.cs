@@ -454,7 +454,7 @@ namespace CodexUsage {
             Lifetime = 7000;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
-            TopMost = true;
+            // Topmost comes from WS_EX_TOPMOST below: the TopMost property would activate the window.
             StartPosition = FormStartPosition.Manual;
             BackColor = Color.FromArgb(44, 44, 46);
             DoubleBuffered = true;
